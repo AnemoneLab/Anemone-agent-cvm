@@ -5,6 +5,7 @@ import express from 'express';
 import cors from 'cors';
 import { initializeDatabase, createWallet, getWallets } from './db/database';
 import { getWalletAddressHandler } from './controllers/walletController';
+import { chatHandler } from './controllers/chatController';
 import { Ed25519Keypair } from '@mysten/sui.js/keypairs/ed25519';
 
 // 初始化数据库
@@ -77,6 +78,9 @@ app.use(express.json());
 
 // 设置路由 - 只提供获取钱包地址的API
 app.get('/wallet', getWalletAddressHandler);
+
+// 添加聊天路由
+app.post('/chat', chatHandler);
 
 // 健康检查接口
 app.get('/health', (req, res) => {
