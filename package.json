@@ -1,6 +1,6 @@
 {
   "name": "anemone-agent-cvm",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Anemone Agent CVM - 在TEE环境中运行的Agent钱包管理服务",
   "main": "index.js",
   "scripts": {
@@ -16,6 +16,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.18.3",
+    "openai": "^4",
     "sqlite3": "^5.1.7"
   },
   "devDependencies": {
@@ -27,4 +28,4 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   }
-} 
+}
