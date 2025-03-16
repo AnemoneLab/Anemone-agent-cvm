@@ -1,15 +1,21 @@
 import { EventBus, AgentEventType } from '../../domain/events/EventBus';
-import { runQuery, getQuery } from '../../infrastructure/persistence/DatabaseSetup';
+import { Profile, ProfileDTO } from '../../domain/profile/Profile';
+import { ProfileRepository } from '../../domain/profile/ProfileRepository';
+import { SQLiteProfileRepository } from '../../infrastructure/persistence/SQLiteProfileRepository';
 
 /**
  * Profile配置服务类，负责管理Agent配置
  */
 export class ProfileService {
+  private profileRepository: ProfileRepository;
+  
   /**
    * 创建一个新的Profile服务实例
    * @param eventBus 事件总线
    */
-  constructor(private readonly eventBus: EventBus) {}
+  constructor(private readonly eventBus: EventBus) {
+    this.profileRepository = new SQLiteProfileRepository();
+  }
   
   /**
    * 初始化Profile配置
@@ -21,34 +27,24 @@ export class ProfileService {
     packageId: string
   ): Promise<{ success: boolean; message: string; id?: number }> {
     try {
-      // 检查是否已存在Profile配置
-      const existingProfile = await this.getProfileData();
+      // 创建ProfileDTO对象
+      const profileDTO: ProfileDTO = {
+        role_id: roleId,
+        package_id: packageId
+      };
       
-      if (existingProfile) {
-        return {
-          success: false,
-          message: '配置文件已存在，不允许重复初始化'
-        };
+      // 调用存储库初始化Profile
+      const result = await this.profileRepository.initProfile(profileDTO);
+      
+      // 如果初始化成功，发布Profile更新事件
+      if (result.success) {
+        this.eventBus.publish(AgentEventType.PROFILE_UPDATED, {
+          roleId,
+          packageId
+        });
       }
       
-      // 保存Profile配置到数据库
-      const timestamp = new Date().toISOString();
-      const result = await runQuery(
-        'INSERT INTO profile (role_id, package_id, created_at, updated_at) VALUES (?, ?, ?, ?)',
-        [roleId, packageId, timestamp, timestamp]
-      );
-      
-      // 发布Profile更新事件
-      this.eventBus.publish(AgentEventType.PROFILE_UPDATED, {
-        roleId,
-        packageId
-      });
-      
-      return {
-        success: true,
-        message: '配置文件初始化成功',
-        id: result.lastID
-      };
+      return result;
     } catch (error) {
       console.error('初始化Profile时出错:', error);
       return {
@@ -63,7 +59,7 @@ export class ProfileService {
    */
   public async getProfile(): Promise<{ success: boolean; profile?: any; message?: string }> {
     try {
-      const profile = await this.getProfileData();
+      const profile = await this.profileRepository.getProfile();
       
       if (!profile) {
         return {
@@ -74,7 +70,7 @@ export class ProfileService {
       
       return {
         success: true,
-        profile
+        profile: profile.toDTO()
       };
     } catch (error) {
       console.error('获取Profile时出错:', error);
@@ -82,19 +78,6 @@ export class ProfileService {
         success: false,
         message: '获取Profile时出错'
       };
-    }
-  }
-  
-  /**
-   * 从数据库获取Profile数据
-   */
-  private async getProfileData(): Promise<any | null> {
-    try {
-      const profiles = await getQuery('SELECT * FROM profile LIMIT 1');
-      return profiles.length > 0 ? profiles[0] : null;
-    } catch (error) {
-      console.error('查询Profile数据时出错:', error);
-      return null;
     }
   }
 } 

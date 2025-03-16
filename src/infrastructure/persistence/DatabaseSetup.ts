@@ -1,20 +1,32 @@
 import sqlite3 from 'sqlite3';
 import { open, Database } from 'sqlite';
+import path from 'path';
+import fs from 'fs';
 
 let db: Database | null = null;
+
+// 数据目录路径
+const DATA_DIR = '/app/data';
+const DB_FILE = path.join(DATA_DIR, 'anemone.db');
 
 /**
  * 设置数据库连接
  */
 export async function setupDatabase(): Promise<void> {
   try {
-    // 使用内存数据库作为示例，实际应用中应使用文件数据库
+    // 确保数据目录存在
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      console.log(`数据目录已创建: ${DATA_DIR}`);
+    }
+    
+    // 使用文件数据库进行持久化存储
     db = await open({
-      filename: ':memory:',
+      filename: DB_FILE,
       driver: sqlite3.Database
     });
     
-    console.log('数据库连接已建立');
+    console.log(`数据库连接已建立: ${DB_FILE}`);
     
     // 创建必要的表
     await createTables();

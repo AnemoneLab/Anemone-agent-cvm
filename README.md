@@ -397,3 +397,54 @@ GET /profile
   "message": "未找到配置文件数据"
 }
 ```
+
+## 部署与数据持久化
+
+Anemone Agent CVM支持数据持久化，所有数据（包括钱包私钥、聊天历史记录和配置文件）都会保存在`/app/data`目录下的SQLite数据库中。
+
+### Docker部署
+
+使用Docker部署时，务必挂载数据卷以确保数据在容器重启或更新后不会丢失：
+
+```bash
+docker run -d -p 3001:3001 -v /host/path/data:/app/data chainrex/anemone-agent-cvm:v2.0.1
+```
+
+### Docker Compose部署
+
+我们也提供了`docker-compose.yml`配置，可以直接使用：
+
+```yaml
+version: '3'
+
+services:
+  anemone-agent-cvm:
+    image: chainrex/anemone-agent-cvm:v2.0.1
+    container_name: anemone-agent-cvm
+    restart: unless-stopped
+    ports:
+      - '3001:3001'
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+```
+
+使用以下命令启动服务：
+
+```bash
+docker-compose up -d
+```
+
+### 数据结构
+
+数据库文件保存在`/app/data/anemone.db`，包含以下表：
+
+1. **wallet** - 存储钱包地址和私钥
+2. **message_history** - 存储聊天历史记录
+3. **profile** - 存储Agent配置信息
+
+### 备份与恢复
+
+建议定期备份`/app/data`目录，以防数据丢失。如需恢复，只需将备份的数据目录挂载到新容器的`/app/data`路径即可。
