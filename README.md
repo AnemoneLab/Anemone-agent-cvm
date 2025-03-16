@@ -106,13 +106,13 @@ GET /chat/history?userId=user123&limit=5&before=2023-10-25T12:34:56.789Z
 }
 ```
 
-### 设置Profile配置
+### 初始化Profile配置
 
 ```
-POST /profile
+POST /profile/init
 ```
 
-设置Agent在Sui区块链上的Role ID和Package ID，注意这些ID只能设置一次，设置后不能再修改。
+初始化Agent在Sui区块链上的Role ID和Package ID，注意这些ID只能初始化一次，设置后不能再修改。
 
 **请求参数:**
 ```json
@@ -126,7 +126,7 @@ POST /profile
 ```json
 {
   "success": true,
-  "message": "配置文件设置成功",
+  "message": "配置文件初始化成功",
   "id": 1
 }
 ```
@@ -135,7 +135,7 @@ POST /profile
 ```json
 {
   "success": false,
-  "message": "配置文件已存在，不允许重复设置"
+  "message": "配置文件已存在，不允许重复初始化"
 }
 ```
 
@@ -251,8 +251,8 @@ Agent采用任务清单模式进行决策：
 
 6. **Profile配置功能** ✅
    - 创建`profile`表用于存储Agent在Sui区块链上的配置
-   - 实现配置的一次性设置机制，确保安全性
-   - 添加获取和设置配置的API接口
+   - 实现配置的一次性初始化机制，确保安全性
+   - 添加获取和初始化配置的API接口
 
 ### 未来计划
 

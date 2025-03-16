@@ -270,17 +270,17 @@ export async function getProfile(): Promise<Profile | null> {
     }
 }
 
-// 设置Profile配置（仅当不存在时才能设置）
-export async function setProfile(profile: Profile): Promise<{ success: boolean, message: string, id?: number }> {
+// 初始化Profile配置（仅当不存在时才能初始化）
+export async function initProfile(profile: Profile): Promise<{ success: boolean, message: string, id?: number }> {
     try {
         // 首先检查是否已经存在配置
         const existingProfile = await getProfile();
         
-        // 如果已存在配置，则不允许再次设置
+        // 如果已存在配置，则不允许再次初始化
         if (existingProfile) {
             return { 
                 success: false, 
-                message: '配置文件已存在，不允许重复设置' 
+                message: '配置文件已存在，不允许重复初始化' 
             };
         }
         
@@ -297,14 +297,14 @@ export async function setProfile(profile: Profile): Promise<{ success: boolean, 
         
         return { 
             success: true, 
-            message: '配置文件设置成功',
+            message: '配置文件初始化成功',
             id: result.lastID 
         };
     } catch (error) {
-        console.error('设置Profile配置时出错:', error);
+        console.error('初始化Profile配置时出错:', error);
         return { 
             success: false, 
-            message: `设置配置文件时发生错误: ${error}` 
+            message: `初始化配置文件时发生错误: ${error}` 
         };
     }
 } 
