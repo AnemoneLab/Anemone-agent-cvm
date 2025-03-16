@@ -1,7 +1,11 @@
 #!/bin/bash
 
+export http_proxy=http://127.0.0.1:1087
+export https_proxy=http://127.0.0.1:1087
+export ALL_PROXY=socks5://127.0.0.1:1080
+
 # 版本标签
-VERSION=v1.2.0
+VERSION=v1.3.0
 IMAGE_NAME=chainrex/anemone-agent-cvm
 
 # 构建单一架构镜像 (仅linux/amd64)

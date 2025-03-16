@@ -42,12 +42,27 @@ const createTables = async (): Promise<void> => {
         )
     `;
 
+    const createMessageHistoryTable = `
+        CREATE TABLE IF NOT EXISTS message_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            message_type TEXT DEFAULT 'text',
+            metadata TEXT
+        )
+    `;
+
     // 使用Promise化的runQuery函数来等待表创建完成
     try {
         await runQuery(createWalletTable);
         console.log('钱包表创建或已存在');
+        
+        await runQuery(createMessageHistoryTable);
+        console.log('消息历史表创建或已存在');
     } catch (error) {
-        console.error('创建钱包表时出错:', error);
+        console.error('创建数据表时出错:', error);
         throw error; // 向上传播错误，确保初始化失败时可以被捕获
     }
 };
@@ -78,6 +93,16 @@ export type Wallet = {
     address: string;
     private_key: string;
     created_at?: string;
+};
+
+export type Message = {
+    id?: number;
+    user_id: string;
+    role: string;
+    content: string;
+    timestamp?: string;
+    message_type?: string;
+    metadata?: string;
 };
 
 // Create a new wallet
@@ -121,6 +146,88 @@ export async function getWallets(): Promise<Wallet[]> {
         return await getQuery(query);
     } catch (error) {
         console.error('Error getting wallets:', error);
+        return [];
+    }
+}
+
+// Save a new message to history
+export async function saveMessage(message: Message): Promise<{ success: boolean, id?: number }> {
+    const query = `
+        INSERT INTO message_history (user_id, role, content, timestamp, message_type, metadata)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `;
+    
+    const timestamp = message.timestamp || new Date().toISOString();
+    const messageType = message.message_type || 'text';
+    
+    try {
+        const result: any = await runQuery(query, [
+            message.user_id,
+            message.role,
+            message.content,
+            timestamp,
+            messageType,
+            message.metadata
+        ]);
+        return { success: true, id: result.lastID };
+    } catch (error) {
+        console.error('Error saving message:', error);
+        return { success: false };
+    }
+}
+
+// Get recent messages for a user
+export async function getRecentMessages(
+    userId: string, 
+    limit: number = 5, 
+    beforeTimestamp?: string
+): Promise<Message[]> {
+    let query = `
+        SELECT id, user_id, role, content, timestamp, message_type, metadata
+        FROM message_history
+        WHERE user_id = ?
+    `;
+    
+    const params: any[] = [userId];
+    
+    if (beforeTimestamp) {
+        query += ` AND timestamp < ?`;
+        params.push(beforeTimestamp);
+    }
+    
+    query += `
+        ORDER BY timestamp DESC
+        LIMIT ?
+    `;
+    params.push(limit);
+    
+    try {
+        const messages = await getQuery(query, params);
+        return messages;
+    } catch (error) {
+        console.error('Error getting recent messages:', error);
+        return [];
+    }
+}
+
+// Get recent conversation history for OpenAI context
+export async function getConversationHistory(
+    userId: string,
+    limit: number = 5
+): Promise<{ role: string, content: string }[]> {
+    try {
+        const messages = await getQuery(`
+            SELECT role, content
+            FROM message_history
+            WHERE user_id = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+        `, [userId, limit]);
+        
+        // Reverse to get chronological order for OpenAI context
+        return messages.reverse();
+    } catch (error) {
+        console.error('Error getting conversation history:', error);
         return [];
     }
 } 
