@@ -1,5 +1,5 @@
-import axios from 'axios';
-import { Message, MessageRole } from '../../domain/memory/ShortTermMemory';
+import { OpenAI } from 'openai';
+import { Message } from '../../domain/memory/ShortTermMemory';
 
 /**
  * OpenAI连接器类，负责与OpenAI API通信
@@ -19,11 +19,15 @@ export class OpenAIConnector {
     apiUrl?: string
   ): Promise<string | undefined> {
     try {
-      const url = apiUrl || 'https://api.openai.com/v1/chat/completions';
+      // 创建OpenAI客户端实例
+      const openai = new OpenAI({
+        apiKey: apiKey,
+        baseURL: apiUrl || undefined
+      });
       
       // 构建消息列表，包括历史消息和当前消息
       const messages = history.map(msg => ({
-        role: msg.role.toLowerCase(),
+        role: msg.role.toLowerCase() as 'system' | 'user' | 'assistant',
         content: msg.content
       }));
       
@@ -33,28 +37,19 @@ export class OpenAIConnector {
         content: currentMessage
       });
       
-      // 请求OpenAI API
-      const response = await axios.post(
-        url,
-        {
-          model: 'gpt-4-turbo',
-          messages,
-          temperature: 0.7,
-          max_tokens: 1000
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
+      // 调用OpenAI API
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages,
+        temperature: 0.7,
+        max_tokens: 1000
+      });
       
       // 返回生成的文本
-      if (response.data?.choices?.[0]?.message?.content) {
-        return response.data.choices[0].message.content;
+      if (completion.choices[0]?.message?.content) {
+        return completion.choices[0].message.content;
       } else {
-        console.error('OpenAI response did not contain expected content:', response.data);
+        console.error('OpenAI response did not contain expected content:', completion);
         return undefined;
       }
     } catch (error) {
