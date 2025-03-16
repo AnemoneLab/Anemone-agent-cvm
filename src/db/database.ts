@@ -54,6 +54,16 @@ const createTables = async (): Promise<void> => {
         )
     `;
 
+    const createProfileTable = `
+        CREATE TABLE IF NOT EXISTS profile (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            role_id TEXT UNIQUE,
+            package_id TEXT UNIQUE,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `;
+
     // 使用Promise化的runQuery函数来等待表创建完成
     try {
         await runQuery(createWalletTable);
@@ -61,6 +71,9 @@ const createTables = async (): Promise<void> => {
         
         await runQuery(createMessageHistoryTable);
         console.log('消息历史表创建或已存在');
+        
+        await runQuery(createProfileTable);
+        console.log('配置文件表创建或已存在');
     } catch (error) {
         console.error('创建数据表时出错:', error);
         throw error; // 向上传播错误，确保初始化失败时可以被捕获
@@ -103,6 +116,14 @@ export type Message = {
     timestamp?: string;
     message_type?: string;
     metadata?: string;
+};
+
+export type Profile = {
+    id?: number;
+    role_id: string;
+    package_id: string;
+    created_at?: string;
+    updated_at?: string;
 };
 
 // Create a new wallet
@@ -229,5 +250,61 @@ export async function getConversationHistory(
     } catch (error) {
         console.error('Error getting conversation history:', error);
         return [];
+    }
+}
+
+// 获取Profile配置
+export async function getProfile(): Promise<Profile | null> {
+    const query = `
+        SELECT id, role_id, package_id, created_at, updated_at
+        FROM profile
+        ORDER BY id DESC
+        LIMIT 1
+    `;
+    try {
+        const result = await getOneQuery(query);
+        return result || null;
+    } catch (error) {
+        console.error('获取Profile配置时出错:', error);
+        return null;
+    }
+}
+
+// 设置Profile配置（仅当不存在时才能设置）
+export async function setProfile(profile: Profile): Promise<{ success: boolean, message: string, id?: number }> {
+    try {
+        // 首先检查是否已经存在配置
+        const existingProfile = await getProfile();
+        
+        // 如果已存在配置，则不允许再次设置
+        if (existingProfile) {
+            return { 
+                success: false, 
+                message: '配置文件已存在，不允许重复设置' 
+            };
+        }
+        
+        // 插入新配置
+        const query = `
+            INSERT INTO profile (role_id, package_id, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        `;
+        
+        const result: any = await runQuery(query, [
+            profile.role_id,
+            profile.package_id
+        ]);
+        
+        return { 
+            success: true, 
+            message: '配置文件设置成功',
+            id: result.lastID 
+        };
+    } catch (error) {
+        console.error('设置Profile配置时出错:', error);
+        return { 
+            success: false, 
+            message: `设置配置文件时发生错误: ${error}` 
+        };
     }
 } 

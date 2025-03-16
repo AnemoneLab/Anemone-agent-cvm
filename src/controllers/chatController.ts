@@ -45,7 +45,7 @@ export const chatHandler = async (req: Request, res: Response) => {
                 });
                 
                 // Get recent conversation history
-                const historyEntries = await getConversationHistory(userId, 5);
+                const historyEntries = await getConversationHistory(userId, 10);
                 
                 // Create messages array with system message + history + current message
                 const messages = [

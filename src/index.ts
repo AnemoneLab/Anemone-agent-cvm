@@ -6,6 +6,7 @@ import cors from 'cors';
 import { initializeDatabase, createWallet, getWallets } from './db/database';
 import { getWalletAddressHandler } from './controllers/walletController';
 import { chatHandler, historyHandler } from './controllers/chatController';
+import { getProfileHandler, setProfileHandler } from './controllers/profileController';
 import { Ed25519Keypair } from '@mysten/sui.js/keypairs/ed25519';
 
 // 初始化数据库
@@ -84,6 +85,10 @@ app.post('/chat', chatHandler);
 
 // 添加聊天历史记录路由
 app.get('/chat/history', historyHandler);
+
+// Profile配置接口
+app.post('/profile', setProfileHandler);
+app.get('/profile', getProfileHandler);
 
 // 健康检查接口
 app.get('/health', (req, res) => {
