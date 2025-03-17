@@ -39,7 +39,7 @@ export class OpenAIConnector {
       
       // 调用OpenAI API
       const completion = await openai.chat.completions.create({
-        model: 'o1-preview',
+        model: 'gpt-4o',
         messages,
         temperature: 0.7,
       });
