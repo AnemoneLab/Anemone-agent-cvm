@@ -10,6 +10,7 @@ import { OpenAIConnector } from '../../infrastructure/llm/OpenAIConnector';
 export class ChatService {
   private memoryRepository: MemoryRepository;
   private openAIConnector: OpenAIConnector;
+  private agentCoordinator: any = null;
   
   /**
    * 创建一个新的聊天服务实例
@@ -20,6 +21,57 @@ export class ChatService {
     this.openAIConnector = new OpenAIConnector();
   }
   
+  /**
+   * 设置AgentCoordinator引用，用于访问其他服务
+   * @param coordinator AgentCoordinator实例
+   */
+  public setAgentCoordinator(coordinator: any): void {
+    this.agentCoordinator = coordinator;
+  }
+
+  /**
+   * 获取可用的Agent能力描述
+   * 这些描述将被添加到LLM的上下文中
+   */
+  private getAgentCapabilities(): string {
+    return `
+作为Anemone Agent，你具有以下能力，可以根据用户的请求自主决定是否调用：
+
+1. 查询链上Role数据能力:
+   - 你可以查询自己在区块链上的角色信息，包括余额、健康值等基本信息
+   - 使用"$execute:queryRoleData"获取Role数据，包括余额、健康值和技能ID列表
+   - 但不包括技能的详细信息，如需技能详细信息请使用技能查询命令
+
+2. 查询技能详细信息:
+   - 你可以查询角色所拥有的技能的详细信息
+   - 使用"$execute:querySkillDetails"获取所有技能的详细信息，包括名称、描述、状态等
+
+3. 获取Profile配置:
+   - 你可以查询自己的配置文件信息
+   - 使用"$execute:getProfile"获取Profile数据
+
+4. 获取钱包信息:
+   - 你可以查询与自己关联的钱包地址
+   - 使用"$execute:getWallet"获取钱包信息
+
+使用命令的强制规则（必须遵守）：
+1. 你的每个回复必须包含至少一个命令，否则系统会拒绝你的回复
+2. 如果用户的问题需要查询数据（如余额、健康值、技能等），使用对应的命令
+3. 如果用户的问题不需要任何查询或命令，你必须使用"$execute:none"命令
+4. 永远不要编造数据，如果需要数据，一定要用命令获取
+
+命令格式：
+- 查询角色命令: "$execute:queryRoleData"
+- 查询技能命令: "$execute:querySkillDetails"
+- 不需要查询时: "$execute:none"
+
+回复指南：
+1. 极度简洁 - 直接给出用户询问的信息，不要添加多余文字
+2. 只回答用户明确询问的内容 - 例如，如果用户只问余额，只返回余额信息；如果只问技能，只返回技能信息
+3. 不要添加客套话或无关的解释
+    `;
+  }
+
   /**
    * 处理聊天消息
    * @param message 消息内容
@@ -55,7 +107,7 @@ export class ChatService {
         timestamp: timestamp.toISOString()
       });
       
-      let responseText: string;
+      let responseText: string = '';
       
       // 如果提供了OpenAI API密钥，使用OpenAI生成回复
       if (apiKey) {
@@ -63,15 +115,108 @@ export class ChatService {
           // 获取最近的对话历史
           const historyEntries = await this.memoryRepository.getConversationHistory(userId, 10);
           
-          // 调用OpenAI API
-          const completion = await this.openAIConnector.generateChatResponse(
-            historyEntries,
-            message,
-            apiKey,
-            apiUrl
+          // 添加Agent能力描述作为系统消息
+          const systemMessage = new Message(
+            userId, // 使用相同的用户ID
+            MessageRole.SYSTEM,
+            this.getAgentCapabilities(),
+            new Date(),
+            MessageType.TEXT,
+            null
           );
           
-          responseText = completion || "无法从OpenAI获取有效回复";
+          // 将系统消息添加到对话历史的开头
+          const historyWithCapabilities = [systemMessage, ...historyEntries];
+          
+          // 循环尝试生成包含命令的回复，最多尝试3次
+          let completion = '';
+          let executionResults = {
+            hasCommands: false,
+            isNoneCommand: false,
+            executedCommands: [] as string[],
+            resultsDescription: ""
+          };
+          let attempts = 0;
+          const maxAttempts = 3;
+          
+          do {
+            attempts++;
+            
+            // 添加重试提示
+            let retryMessage = message;
+            if (attempts > 1) {
+              console.log(`[ChatService] 第${attempts}次尝试生成包含命令的回复`);
+              retryMessage = message + "\n\n系统消息：你必须在回复中包含命令（比如$execute:queryRoleData或$execute:none）。如果不需要查询数据，请使用$execute:none命令。";
+            }
+            
+            // 调用OpenAI API获取初始回复
+            completion = await this.openAIConnector.generateChatResponse(
+              historyWithCapabilities,
+              retryMessage,
+              apiKey,
+              apiUrl
+            ) || '';  // 确保completion不会是undefined
+            
+            if (!completion) {
+              console.error('[ChatService] OpenAI返回空回复');
+              break;
+            }
+            
+            console.log(`[ChatService] 第${attempts}次尝试收到LLM初始回复:`, completion);
+            console.log('[ChatService] 开始解析回复中的命令');
+            
+            // 解析回复中的命令
+            executionResults = await this.executeCommands(completion);
+            
+            console.log('[ChatService] 命令执行结果:', { 
+              hasCommands: executionResults.hasCommands,
+              commandsCount: executionResults.executedCommands.length,
+              isNoneCommand: executionResults.isNoneCommand
+            });
+            
+            // 如果回复中有命令或者已经尝试了最大次数，则退出循环
+          } while (!executionResults.hasCommands && attempts < maxAttempts);
+          
+          // 处理执行结果
+          if (!completion) {
+            responseText = "无法从OpenAI获取有效回复";
+          } else if (executionResults.hasCommands && !executionResults.isNoneCommand) {
+            // 如果有命令被执行（且不是none命令），将结果作为上下文发送给LLM生成最终回复
+            const contextWithResults = `
+你之前决定执行以下查询：
+${executionResults.executedCommands.join('\n')}
+
+查询结果：
+${executionResults.resultsDescription}
+
+请将这些结果整合到你的回复中，遵循以下规则：
+1. 极度简洁 - 直接给出用户询问的信息，不要添加多余文字
+2. 只回答用户明确询问的内容 - 例如，如果用户只问余额，只返回余额信息
+3. 不要提及命令格式或系统操作的细节
+4. 不要添加客套话或无关的解释
+5. 如果用户只询问了一项信息（如余额），回复应该简短如"您的余额是X SUI"
+`;
+
+            // 再次调用OpenAI以生成包含查询结果的最终回复
+            const finalCompletion = await this.openAIConnector.generateChatResponse(
+              historyEntries, // 使用原始历史，不包含系统能力描述
+              message + "\n\n" + contextWithResults, // 在用户消息后附加结果上下文
+              apiKey,
+              apiUrl
+            );
+            
+            responseText = finalCompletion || completion;
+          } else if (executionResults.isNoneCommand) {
+            // 如果是NONE命令，直接使用原始回复（不添加警告）
+            console.log('[ChatService] 使用$execute:none命令，直接使用原始回复');
+            
+            // 移除$execute:none命令从回复中
+            responseText = completion.replace(/\$execute:none/gi, '').trim();
+          } else {
+            // 如果没有命令且已尝试最大次数，添加警告并使用原始回复
+            console.warn('[ChatService] 多次尝试后仍未找到命令，使用原始回复');
+            responseText = "注意：系统无法确认此回复是否包含准确数据。请明确要求我执行查询命令以获取准确信息。\n\n" + completion;
+          }
         } catch (openaiError: any) {
           console.error('[CVM Chat] OpenAI API error:', openaiError);
           responseText = `OpenAI API调用失败: ${openaiError.message || '未知错误'}`;
@@ -103,6 +248,239 @@ export class ChatService {
       console.error('[CVM Chat] Error processing message:', error);
       return { success: false, error: '处理消息时出错' };
     }
+  }
+  
+  /**
+   * 执行LLM回复中包含的命令
+   * @param llmResponse LLM生成的回复文本
+   * @returns 执行结果信息
+   */
+  private async executeCommands(llmResponse: string): Promise<{
+    hasCommands: boolean;
+    isNoneCommand: boolean;
+    executedCommands: string[];
+    resultsDescription: string;
+  }> {
+    const result = {
+      hasCommands: false,
+      isNoneCommand: false,
+      executedCommands: [] as string[],
+      resultsDescription: ""
+    };
+    
+    // 检测可能的数据编造情况
+    const fabricationPatterns = [
+      /余额[:：]\s*\d+/i,
+      /balance[:：]\s*\d+/i,
+      /(\d+)\s*SUI/i,
+      /(\d+)\s*余额/i,
+      /健康值[:：]\s*\d+/i,
+      /health[:：]\s*\d+/i
+    ];
+    
+    // 检查回复中是否包含编造数据的模式
+    let hasFabricatedData = false;
+    for (const pattern of fabricationPatterns) {
+      if (pattern.test(llmResponse)) {
+        console.warn('[ChatService] 检测到可能的数据编造模式:', pattern);
+        hasFabricatedData = true;
+        break;
+      }
+    }
+    
+    // 检查是否有$execute:none命令
+    const noneCommandRegex = /\$execute:none/i;
+    if (noneCommandRegex.test(llmResponse)) {
+      console.log('[ChatService] 检测到$execute:none命令');
+      result.hasCommands = true;
+      result.isNoneCommand = true;
+      result.executedCommands.push('$execute:none');
+      return result;
+    }
+    
+    // 如果AgentCoordinator未设置，直接返回
+    if (!this.agentCoordinator) {
+      console.warn('[ChatService] executeCommands: AgentCoordinator未设置，无法执行命令');
+      // 如果检测到可能编造的数据，标记为NONE命令
+      if (hasFabricatedData) {
+        result.hasCommands = true;
+        result.isNoneCommand = true;
+        result.executedCommands.push('$execute:none');
+      }
+      return result;
+    }
+    
+    console.log('[ChatService] 开始使用正则表达式查找命令');
+    // 查找命令模式: $execute:commandName
+    const commandRegex = /\$execute:(\w+)/g;
+    let match;
+    let resultsArray = [];
+    
+    // 记录全部匹配尝试
+    const allMatches = [...llmResponse.matchAll(commandRegex)];
+    console.log('[ChatService] 正则表达式匹配结果数量:', allMatches.length);
+    if (allMatches.length > 0) {
+      console.log('[ChatService] 匹配到的命令:', allMatches.map(m => m[1]));
+    } else if (hasFabricatedData) {
+      // 如果没有匹配到命令但检测到编造数据，标记为NONE命令
+      console.warn('[ChatService] 未匹配到命令但检测到可能编造的数据，标记为NONE命令');
+      result.hasCommands = true;
+      result.isNoneCommand = true;
+      result.executedCommands.push('$execute:none');
+      return result;
+    }
+    
+    while ((match = commandRegex.exec(llmResponse)) !== null) {
+      const command = match[1];
+      console.log('[ChatService] 解析到命令:', command);
+      result.hasCommands = true;
+      result.executedCommands.push(`$execute:${command}`);
+      
+      // 根据命令执行相应操作
+      try {
+        let commandResult: any;
+        
+        switch (command) {
+          case 'queryRoleData':
+            console.log('[ChatService] 开始执行queryRoleData命令');
+            try {
+              commandResult = await this.agentCoordinator.getRoleOnChainData();
+              console.log('[ChatService] queryRoleData命令执行结果:', { 
+                success: commandResult.success,
+                hasRole: commandResult.role ? true : false
+              });
+            } catch (error) {
+              console.error('[ChatService] queryRoleData命令执行出错:', error);
+              throw error;
+            }
+            
+            if (commandResult.success && commandResult.role) {
+              const roleData = commandResult.role;
+              const suiBalance = Number(roleData.balance) / 1_000_000_000;
+              const healthValue = Number(roleData.health) / 1_000_000_000;
+              
+              // 构建基本角色信息 - 只包含基本属性和技能ID列表，不包含技能详细信息
+              let roleInfo = `
+Role数据查询结果:
+- 余额: ${suiBalance.toFixed(6)} SUI
+- 健康值: ${healthValue.toFixed(2)}
+- 激活状态: ${roleData.is_active ? '已激活' : '未激活'}
+- 锁定状态: ${roleData.is_locked ? '已锁定' : '未锁定'}
+`;
+
+              // 添加技能ID列表
+              if (roleData.skills && roleData.skills.length > 0) {
+                roleInfo += `- 技能数量: ${roleData.skills.length}个\n- 技能ID列表: ${roleData.skills.join(', ')}`;
+              } else {
+                roleInfo += `- 暂无技能`;
+              }
+              
+              resultsArray.push(roleInfo);
+            } else {
+              resultsArray.push(`Role数据查询失败: ${commandResult.message || '未知错误'}`);
+            }
+            break;
+            
+          case 'querySkillDetails':
+            console.log('[ChatService] 开始执行querySkillDetails命令');
+            try {
+              commandResult = await this.agentCoordinator.getRoleOnChainData();
+              console.log('[ChatService] querySkillDetails命令执行结果:', { 
+                success: commandResult.success,
+                skillCount: commandResult.skillDetails ? commandResult.skillDetails.length : 0
+              });
+            } catch (error) {
+              console.error('[ChatService] querySkillDetails命令执行出错:', error);
+              throw error;
+            }
+            
+            if (commandResult.success && commandResult.skillDetails && commandResult.skillDetails.length > 0) {
+              let skillsInfo = `技能详细信息查询结果 (共${commandResult.skillDetails.length}个技能):\n`;
+              
+              commandResult.skillDetails.forEach((skill: any, index: number) => {
+                skillsInfo += `
+技能 ${index + 1}: ${skill.name}
+- ID: ${skill.id}
+- 描述: ${skill.description}
+- 状态: ${skill.is_enabled ? '已启用' : '已禁用'}
+- 费用: ${skill.fee} SUI
+- 作者: ${skill.author || '未知'}
+${skill.github_repo ? `- GitHub: ${skill.github_repo}` : ''}
+`;
+              });
+              
+              resultsArray.push(skillsInfo);
+            } else if (commandResult.success && commandResult.role && commandResult.role.skills && commandResult.role.skills.length > 0) {
+              resultsArray.push(`找到${commandResult.role.skills.length}个技能ID，但无法获取详细信息: ${commandResult.role.skills.join(', ')}`);
+            } else {
+              resultsArray.push(`技能查询失败或未找到技能: ${commandResult.message || '未知错误'}`);
+            }
+            break;
+            
+          case 'getProfile':
+            console.log('[ChatService] 开始执行getProfile命令');
+            try {
+              commandResult = await this.agentCoordinator.getProfile();
+              console.log('[ChatService] getProfile命令执行结果:', { 
+                success: commandResult.success,
+                hasProfile: commandResult.profile ? true : false 
+              });
+            } catch (error) {
+              console.error('[ChatService] getProfile命令执行出错:', error);
+              throw error;
+            }
+            
+            if (commandResult.success && commandResult.profile) {
+              resultsArray.push(`
+Profile查询结果:
+- Role ID: ${commandResult.profile.role_id}
+- Package ID: ${commandResult.profile.package_id}
+- 创建时间: ${commandResult.profile.created_at || '未知'}
+              `);
+            } else {
+              resultsArray.push(`Profile查询失败: ${commandResult.message || '未知错误'}`);
+            }
+            break;
+            
+          case 'getWallet':
+            console.log('[ChatService] 开始执行getWallet命令');
+            try {
+              commandResult = await this.agentCoordinator.getWalletAddress();
+              console.log('[ChatService] getWallet命令执行结果:', {
+                success: commandResult.success,
+                hasAddress: commandResult.address ? true : false
+              });
+            } catch (error) {
+              console.error('[ChatService] getWallet命令执行出错:', error);
+              throw error;
+            }
+            
+            if (commandResult.success && commandResult.address) {
+              resultsArray.push(`
+钱包查询结果:
+- 地址: ${commandResult.address}
+- 创建时间: ${commandResult.created_at || '未知'}
+              `);
+            } else {
+              resultsArray.push(`钱包查询失败: ${commandResult.error || '未知错误'}`);
+            }
+            break;
+            
+          default:
+            console.warn('[ChatService] 未知命令:', command);
+            resultsArray.push(`未知命令: ${command}`);
+        }
+      } catch (error) {
+        console.error(`[ChatService] 执行命令 ${command} 时出错:`, error);
+        resultsArray.push(`执行命令 ${command} 时出错: ${error}`);
+      }
+    }
+    
+    // 组合所有结果
+    result.resultsDescription = resultsArray.join("\n\n");
+    console.log('[ChatService] 命令执行完成, 结果长度:', result.resultsDescription.length);
+    
+    return result;
   }
   
   /**

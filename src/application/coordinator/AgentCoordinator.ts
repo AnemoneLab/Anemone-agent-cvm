@@ -4,6 +4,7 @@ import { SkillRegistry } from '../../domain/skill/SkillRegistry';
 import { ProfileService } from '../usecases/ProfileService';
 import { ChatService } from '../usecases/ChatService';
 import { WalletService } from '../usecases/WalletService';
+import { RoleData } from '../../domain/profile/RoleData';
 
 /**
  * 代理协调器上下文实现
@@ -183,6 +184,30 @@ export class AgentCoordinator {
   }
   
   /**
+   * 获取区块链上的Role对象数据
+   * 只有Agent自己可以执行此操作，用于查看自己绑定的链上role object内容
+   */
+  public async getRoleOnChainData(): Promise<{ success: boolean, role?: RoleData, skillDetails?: any[], message?: string }> {
+    console.log('[AgentCoordinator] 开始获取链上Role数据');
+    try {
+      const result = await this.profileService.getRoleOnChainData();
+      console.log('[AgentCoordinator] 获取链上Role数据结果:', { 
+        success: result.success,
+        hasRole: result.role ? true : false,
+        skillCount: result.skillDetails ? result.skillDetails.length : 0
+      });
+      
+      return result;
+    } catch (error) {
+      console.error('[AgentCoordinator] 获取链上Role数据出错:', error);
+      return {
+        success: false,
+        message: '获取链上Role数据时发生错误: ' + (error instanceof Error ? error.message : String(error))
+      };
+    }
+  }
+  
+  /**
    * 获取钱包地址
    */
   public async getWalletAddress(): Promise<{ success: boolean, address?: string, created_at?: string, error?: string }> {
@@ -252,5 +277,13 @@ export class AgentCoordinator {
    */
   public async getWalletInfo(): Promise<{ success: boolean, address?: string, created_at?: string, error?: string }> {
     return await this.walletService.getWalletInfo();
+  }
+
+  /**
+   * 获取ChatService实例
+   * 便于外部设置AgentCoordinator
+   */
+  public getChatService(): ChatService {
+    return this.chatService;
   }
 } 

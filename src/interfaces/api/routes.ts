@@ -124,6 +124,16 @@ function setupWalletRoutes(app: any, walletService: WalletService): void {
  * @param agentCoordinator 代理协调器实例
  */
 function setupChatRoutes(app: any, agentCoordinator: AgentCoordinator): void {
+  // 确保ChatService中的agentCoordinator被正确设置
+  console.log('[API Routes] 设置ChatService的AgentCoordinator实例');
+  const chatService = agentCoordinator.getChatService();
+  if (chatService) {
+    console.log('[API Routes] 成功获取ChatService实例并设置AgentCoordinator');
+    chatService.setAgentCoordinator(agentCoordinator);
+  } else {
+    console.error('[API Routes] 无法获取ChatService实例，命令执行功能可能无法正常工作');
+  }
+  
   // 聊天路由
   app.post('/chat', async (req: Request, res: Response) => {
     try {

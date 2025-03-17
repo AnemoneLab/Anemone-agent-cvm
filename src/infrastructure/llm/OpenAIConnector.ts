@@ -39,10 +39,9 @@ export class OpenAIConnector {
       
       // 调用OpenAI API
       const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: 'o1-preview',
         messages,
         temperature: 0.7,
-        max_tokens: 1000
       });
       
       // 返回生成的文本

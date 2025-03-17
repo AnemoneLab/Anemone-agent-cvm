@@ -4,7 +4,7 @@ import { PrivateKeyManager } from '../../infrastructure/security/PrivateKeyManag
 import { Wallet, WalletDTO } from '../../domain/wallet/Wallet';
 import { WalletRepository } from '../../domain/wallet/WalletRepository';
 import { SQLiteWalletRepository } from '../../infrastructure/persistence/SQLiteWalletRepository';
-import { Ed25519Keypair } from '@mysten/sui.js/keypairs/ed25519';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 
 /**
  * 钱包服务类，负责管理Sui区块链钱包
