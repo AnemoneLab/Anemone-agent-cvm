@@ -1,6 +1,7 @@
 import { Action } from './Action';
 import { BalanceWithdraw } from './financialActions/BalanceWithdraw';
 import { ProfileUpdate } from './systemActions/ProfileUpdate';
+import { TokenBalanceAction } from './blockchainActions/TokenBalanceAction';
 
 /**
  * 代理上下文接口，提供权限验证
@@ -35,6 +36,9 @@ export class ActionRegistry {
     
     // 注册系统操作
     this.registerAction(new ProfileUpdate());
+    
+    // 注册区块链操作
+    this.registerAction(new TokenBalanceAction());
   }
   
   /**

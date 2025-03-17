@@ -54,6 +54,11 @@ export class ChatService {
    - 你可以查询与自己关联的钱包地址
    - 使用"$execute:getWallet"获取钱包信息
 
+5. 查询代币余额信息:
+   - 你可以查询自己或指定地址的所有代币余额信息
+   - 使用"$execute:getTokens"获取详细代币列表
+   - 使用"$execute:getTokensSummary"获取代币余额汇总信息，包括总美元价值和SUI余额
+
 使用命令的强制规则（必须遵守）：
 1. 你的每个回复必须包含至少一个命令，否则系统会拒绝你的回复
 2. 如果用户的问题需要查询数据（如余额、健康值、技能等），使用对应的命令
@@ -63,6 +68,8 @@ export class ChatService {
 命令格式：
 - 查询角色命令: "$execute:queryRoleData"
 - 查询技能命令: "$execute:querySkillDetails"
+- 查询代币列表: "$execute:getTokens"
+- 查询代币汇总: "$execute:getTokensSummary"
 - 不需要查询时: "$execute:none"
 
 回复指南：
@@ -463,6 +470,91 @@ Profile查询结果:
               `);
             } else {
               resultsArray.push(`钱包查询失败: ${commandResult.error || '未知错误'}`);
+            }
+            break;
+            
+          case 'getTokens':
+            console.log('[ChatService] 开始执行getTokens命令');
+            try {
+              commandResult = await this.agentCoordinator.getAccountTokens();
+              console.log('[ChatService] getTokens命令执行结果:', { 
+                success: commandResult.success,
+                hasData: commandResult.data ? true : false 
+              });
+            } catch (error) {
+              console.error('[ChatService] getTokens命令执行出错:', error);
+              throw error;
+            }
+            
+            if (commandResult.success && commandResult.data) {
+              const tokens = commandResult.data;
+              if (tokens.length === 0) {
+                resultsArray.push('未找到任何代币');
+              } else {
+                let tokensInfo = `找到 ${tokens.length} 种代币:\n\n`;
+                
+                // 先提取SUI代币信息
+                const suiToken = tokens.find((token: any) => token.coinType === '0x2::sui::SUI');
+                if (suiToken) {
+                  tokensInfo += `SUI余额: ${suiToken.balance} (价值约 $${suiToken.balanceUsd || '未知'})\n\n`;
+                }
+                
+                // 按照美元价值排序（从高到低）
+                const sortedTokens = [...tokens].sort((a: any, b: any) => {
+                  if (a.balanceUsd === null && b.balanceUsd === null) return 0;
+                  if (a.balanceUsd === null) return 1;
+                  if (b.balanceUsd === null) return -1;
+                  return b.balanceUsd - a.balanceUsd;
+                });
+                
+                // 最多显示10种代币详情
+                const topTokens = sortedTokens.slice(0, 10);
+                
+                tokensInfo += `前${Math.min(10, sortedTokens.length)}种代币详情:\n`;
+                
+                topTokens.forEach((token: any, index: number) => {
+                  tokensInfo += `
+${index + 1}. ${token.coinSymbol || token.coinName || token.coinType}
+   余额: ${token.balance}
+   美元价值: ${token.balanceUsd !== null ? '$' + token.balanceUsd : '未知'}
+   代币价格: ${token.coinPrice !== null ? '$' + token.coinPrice : '未知'}
+`;
+                });
+                
+                if (sortedTokens.length > 10) {
+                  tokensInfo += `\n还有 ${sortedTokens.length - 10} 种代币未显示`;
+                }
+                
+                resultsArray.push(tokensInfo);
+              }
+            } else {
+              resultsArray.push(`代币查询失败: ${commandResult.message || '未知错误'}`);
+            }
+            break;
+            
+          case 'getTokensSummary':
+            console.log('[ChatService] 开始执行getTokensSummary命令');
+            try {
+              commandResult = await this.agentCoordinator.getAccountTokensSummary();
+              console.log('[ChatService] getTokensSummary命令执行结果:', { 
+                success: commandResult.success,
+                hasData: commandResult.data ? true : false 
+              });
+            } catch (error) {
+              console.error('[ChatService] getTokensSummary命令执行出错:', error);
+              throw error;
+            }
+            
+            if (commandResult.success && commandResult.data) {
+              const summary = commandResult.data;
+              resultsArray.push(`
+代币余额汇总:
+- 总美元价值: $${summary.totalUsdValue.toFixed(2)}
+- SUI余额: ${summary.suiBalance.toFixed(6)} SUI (价值约 $${summary.suiUsdValue.toFixed(2)})
+- 代币种类: ${summary.tokensCount} 种
+`);
+            } else {
+              resultsArray.push(`代币汇总查询失败: ${commandResult.message || '未知错误'}`);
             }
             break;
             

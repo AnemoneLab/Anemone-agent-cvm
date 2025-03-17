@@ -4,13 +4,15 @@ import { SkillRegistry } from '../../domain/skill/SkillRegistry';
 import { ProfileService } from '../usecases/ProfileService';
 import { ChatService } from '../usecases/ChatService';
 import { WalletService } from '../usecases/WalletService';
+import { BlockberryService } from '../usecases/BlockberryService';
 import { RoleData } from '../../domain/profile/RoleData';
+import { TokenBalance } from '../../infrastructure/blockchain/BlockberryConnector';
 
 /**
  * 代理协调器上下文实现
  */
 class AgentContextImpl implements AgentContext {
-  private permissions: Set<string> = new Set(['BASIC_OPERATION']);
+  private permissions: Set<string> = new Set(['BASIC_OPERATION', 'BLOCKCHAIN_QUERY']);
   
   /**
    * 授予权限
@@ -39,6 +41,7 @@ export class AgentCoordinator {
   private profileService: ProfileService;
   private chatService: ChatService;
   private walletService: WalletService;
+  private blockberryService: BlockberryService;
   
   /**
    * 创建一个新的代理协调器实例
@@ -53,6 +56,7 @@ export class AgentCoordinator {
     this.profileService = new ProfileService(eventBus);
     this.chatService = new ChatService(eventBus);
     this.walletService = new WalletService(eventBus);
+    this.blockberryService = new BlockberryService(eventBus);
     
     // 订阅相关事件
     this.eventBus.subscribe(AgentEventType.MESSAGE_RECEIVED, this.onMessageReceived.bind(this));
@@ -285,5 +289,65 @@ export class AgentCoordinator {
    */
   public getChatService(): ChatService {
     return this.chatService;
+  }
+
+  /**
+   * 获取链上代币余额
+   * @param address 钱包地址，如果不提供则使用当前钱包地址
+   * @returns 包含代币余额的对象
+   */
+  public async getAccountTokens(address?: string): Promise<{ success: boolean, data?: any, message?: string }> {
+    try {
+      // 如果没有提供地址，则获取当前钱包地址
+      if (!address) {
+        const walletInfo = await this.walletService.getWalletInfo();
+        if (!walletInfo.success || !walletInfo.address) {
+          return {
+            success: false,
+            message: '无法获取钱包地址'
+          };
+        }
+        address = walletInfo.address;
+      }
+      
+      // 调用token_balance Action获取代币余额
+      return await this.executeAction('token_balance', { address, summary: false });
+    } catch (error: any) {
+      console.error('获取链上代币余额时出错:', error);
+      return {
+        success: false,
+        message: `获取代币余额失败: ${error.message}`
+      };
+    }
+  }
+  
+  /**
+   * 获取链上代币余额汇总
+   * @param address 钱包地址，如果不提供则使用当前钱包地址
+   * @returns 包含代币余额汇总的对象
+   */
+  public async getAccountTokensSummary(address?: string): Promise<{ success: boolean, data?: any, message?: string }> {
+    try {
+      // 如果没有提供地址，则获取当前钱包地址
+      if (!address) {
+        const walletInfo = await this.walletService.getWalletInfo();
+        if (!walletInfo.success || !walletInfo.address) {
+          return {
+            success: false,
+            message: '无法获取钱包地址'
+          };
+        }
+        address = walletInfo.address;
+      }
+      
+      // 调用token_balance Action获取代币余额汇总
+      return await this.executeAction('token_balance', { address, summary: true });
+    } catch (error: any) {
+      console.error('获取链上代币余额汇总时出错:', error);
+      return {
+        success: false,
+        message: `获取代币余额汇总失败: ${error.message}`
+      };
+    }
   }
 } 
