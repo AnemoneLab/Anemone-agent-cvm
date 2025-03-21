@@ -5,7 +5,9 @@ export enum MessageType {
   TEXT = 'text',
   IMAGE = 'image',
   AUDIO = 'audio',
-  FILE = 'file'
+  FILE = 'file',
+  INTENT_ANALYSIS = 'intent_analysis',
+  COMMAND_RESULT = 'command_result'
 }
 
 /**
@@ -28,6 +30,8 @@ export class Message {
   timestamp: Date;
   messageType: MessageType;
   metadata: string | null;
+  conversation_round?: number;
+  related_message_id?: number;
   
   /**
    * 创建一个新的消息实例
@@ -39,7 +43,9 @@ export class Message {
     timestamp: Date = new Date(),
     messageType: MessageType = MessageType.TEXT,
     metadata: string | null = null,
-    id?: number
+    id?: number,
+    conversation_round?: number,
+    related_message_id?: number
   ) {
     this.id = id;
     this.user_id = user_id;
@@ -48,6 +54,8 @@ export class Message {
     this.timestamp = timestamp;
     this.messageType = messageType;
     this.metadata = metadata;
+    this.conversation_round = conversation_round;
+    this.related_message_id = related_message_id;
   }
   
   /**
@@ -69,7 +77,9 @@ export class Message {
       new Date(dto.timestamp),
       (dto.message_type as MessageType) || MessageType.TEXT,
       dto.metadata,
-      dto.id
+      dto.id,
+      dto.conversation_round,
+      dto.related_message_id
     );
   }
 
@@ -84,7 +94,9 @@ export class Message {
       content: this.content,
       timestamp: this.timestamp.toISOString(),
       message_type: this.messageType,
-      metadata: this.metadata
+      metadata: this.metadata,
+      conversation_round: this.conversation_round,
+      related_message_id: this.related_message_id
     };
   }
 
@@ -110,6 +122,8 @@ export interface MessageDTO {
   timestamp?: string;
   message_type?: string;
   metadata?: string | null;
+  conversation_round?: number;
+  related_message_id?: number;
 }
 
 /**

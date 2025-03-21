@@ -7,6 +7,9 @@ import { BlockberryService } from './BlockberryService';
 import { ProfileService } from './ProfileService';
 import { WalletService } from './WalletService';
 import { OpenAIConnector } from '../../infrastructure/llm/OpenAIConnector';
+import { ChatService } from './ChatService';
+import { Message, MessageRole, MessageType } from '../../domain/memory/ShortTermMemory';
+import { OpenAI } from 'openai';
 
 /**
  * 命令执行器实现
@@ -309,17 +312,55 @@ export class PlanningService {
     }
     
     try {
+      // 创建ChatService用于保存消息和获取历史记录
+      const chatService = new ChatService(this.eventBus);
+      
+      // 获取按会话轮次组织的历史消息（最近3轮对话）
+      const conversationHistory = await chatService.getMessagesByRounds(userId, 3);
+      console.log(`[PlanningService] 已获取${conversationHistory.length}条按轮次组织的对话历史`);
+      
+      // 获取下一个会话轮次
+      const nextRound = await chatService.getNextConversationRound(userId);
+      console.log(`[PlanningService] 当前对话轮次: ${nextRound}`);
+      
+      // 保存用户消息（带有轮次信息）
+      const userMsgResult = await chatService.saveMessage({
+        user_id: userId,
+        role: 'user',
+        content: message,
+        timestamp: new Date().toISOString(),
+        conversation_round: nextRound
+      });
+      
       // 设置 LLMTaskPlanner 的 API Key 和 API URL
       if (apiKey) {
         // 更新 taskPlanner 的 API Key 和 URL
         this.taskPlanner = new LLMTaskPlanner(this.openAIConnector, apiKey, apiUrl);
       }
       
-      // 1. 创建任务计划
+      // 1. 创建任务计划（传入对话历史）
       const taskPlan = await this.taskPlanner.createPlan(
         userId,
-        message
+        message,
+        conversationHistory
       );
+      
+      // 保存意图分析结果
+      let intentAnalysisId: number | undefined;
+      try {
+        const intentAnalysisResult = await chatService.saveMessage({
+          user_id: userId,
+          role: 'system',
+          content: JSON.stringify(taskPlan.getTasks()),
+          timestamp: new Date().toISOString(),
+          message_type: MessageType.INTENT_ANALYSIS,
+          conversation_round: nextRound,
+          related_message_id: userMsgResult.id
+        });
+        intentAnalysisId = intentAnalysisResult.id;
+      } catch (error) {
+        console.error('[PlanningService] 保存意图分析结果出错:', error);
+      }
       
       // 2. 发布计划创建事件
       this.eventBus.publish(AgentEventType.PLAN_UPDATED, {
@@ -336,6 +377,21 @@ export class PlanningService {
       // 3. 执行任务计划
       const executionResults = await this.taskExecutor.executePlan(taskPlan);
       
+      // 保存命令执行结果
+      try {
+        await chatService.saveMessage({
+          user_id: userId,
+          role: 'system',
+          content: executionResults,
+          timestamp: new Date().toISOString(),
+          message_type: MessageType.COMMAND_RESULT,
+          conversation_round: nextRound,
+          related_message_id: userMsgResult.id
+        });
+      } catch (error) {
+        console.error('[PlanningService] 保存命令执行结果出错:', error);
+      }
+      
       // 4. 生成最终回复
       let finalResponse = '';
       if (apiKey) {
@@ -343,11 +399,22 @@ export class PlanningService {
           message,
           executionResults,
           apiKey,
-          apiUrl
+          apiUrl,
+          conversationHistory
         );
       } else {
         finalResponse = "请提供 API 密钥以启用 AI 回复功能。";
       }
+      
+      // 保存助手回复（带有轮次信息）
+      await chatService.saveMessage({
+        user_id: userId,
+        role: 'assistant',
+        content: finalResponse,
+        timestamp: new Date().toISOString(),
+        conversation_round: nextRound,
+        related_message_id: userMsgResult.id
+      });
       
       // 5. 任务完成后，发布任务计划完成事件
       const results = {
@@ -388,34 +455,148 @@ export class PlanningService {
    * @param executionResults 执行结果字符串
    * @param apiKey API 密钥
    * @param apiUrl API URL(可选)
+   * @param chatHistory 聊天历史(可选)
    * @returns 最终回复文本
    */
   private async generateFinalResponse(
     userMessage: string, 
     executionResults: string, 
     apiKey: string, 
-    apiUrl?: string
+    apiUrl?: string,
+    chatHistory: any[] = []
   ): Promise<string> {
     try {
       // 获取结果格式化提示词
       const formattingPrompt = this.getResultFormattingPrompt(executionResults, userMessage);
       
-      // 直接调用 OpenAI 生成回复，不使用 Message 对象
+      // 格式化聊天历史为消息对象
+      const messageArray = [];
+      
+      // 添加系统提示
+      messageArray.push({
+        role: 'system',
+        content: formattingPrompt
+      });
+      
+      // 组织聊天历史（按轮次处理）
+      if (chatHistory && chatHistory.length > 0) {
+        // 按轮次分组
+        const messagesByRound: { [key: number]: any[] } = {};
+        
+        for (const msg of chatHistory) {
+          if (!msg.conversation_round) continue;
+          
+          if (!messagesByRound[msg.conversation_round]) {
+            messagesByRound[msg.conversation_round] = [];
+          }
+          messagesByRound[msg.conversation_round].push(msg);
+        }
+        
+        // 获取最近3轮
+        const rounds = Object.keys(messagesByRound)
+          .map(Number)
+          .sort((a, b) => a - b)
+          .slice(-3); // 最近3轮
+        
+        // 添加历史对话，按轮次组织，每轮包含用户消息、意图分析和命令执行结果
+        for (const round of rounds) {
+          const roundMessages = messagesByRound[round];
+          
+          // 添加系统消息，标记轮次开始
+          messageArray.push({
+            role: 'system',
+            content: `--- 对话轮次 ${round} ---`
+          });
+          
+          // 先添加用户和助手的消息
+          for (const msg of roundMessages.filter(m => m.role === 'user' || m.role === 'assistant')) {
+            messageArray.push({
+              role: msg.role,
+              content: msg.content
+            });
+          }
+          
+          // 然后添加意图分析结果
+          const intentMsg = roundMessages.find(m => m.message_type === 'intent_analysis');
+          if (intentMsg) {
+            messageArray.push({
+              role: 'system',
+              content: `意图分析结果: ${intentMsg.content}`
+            });
+          }
+          
+          // 最后添加命令执行结果
+          const commandResultMsg = roundMessages.find(m => m.message_type === 'command_result');
+          if (commandResultMsg) {
+            messageArray.push({
+              role: 'system',
+              content: `命令执行结果: ${commandResultMsg.content}`
+            });
+          }
+        }
+      }
+      
+      // 添加当前用户消息
+      messageArray.push({
+        role: 'user',
+        content: userMessage
+      });
+      
+      // 添加当前执行结果作为系统消息
+      messageArray.push({
+        role: 'system',
+        content: `执行结果:\n${executionResults}\n\n请根据以上对话历史和执行结果生成回复。`
+      });
+      
       try {
-        // 将提示词和用户消息拼接到一起
-        const combinedPrompt = `${formattingPrompt}\n\n用户消息: ${userMessage}\n\n执行结果: ${executionResults}\n\n请根据以上信息生成回复:`;
+        // 创建OpenAI客户端实例
+        const openai = new OpenAI({
+          apiKey: apiKey,
+          baseURL: apiUrl || undefined
+        });
         
-        const response = await this.openAIConnector.generateChatResponse(
-          [], // 空历史，因为我们将所有内容放在了 combinedPrompt 中
-          combinedPrompt,
-          apiKey,
-          apiUrl
-        );
+        // 使用OpenAI API生成回复
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: messageArray,
+          temperature: 0.7,
+        });
         
-        return response || '抱歉，我无法处理您的请求。';
+        if (completion.choices[0]?.message?.content) {
+          return completion.choices[0].message.content;
+        } else {
+          return '抱歉，我无法处理您的请求。';
+        }
       } catch (error) {
         console.error('[PlanningService] OpenAI 调用失败:', error);
-        return `抱歉，生成回复时发生错误: ${error}`;
+        
+        // 尝试使用简化的方法重试
+        try {
+          // 将提示词和用户消息拼接到一起
+          const combinedPrompt = `${formattingPrompt}\n\n用户消息: ${userMessage}\n\n执行结果: ${executionResults}\n\n请根据以上信息生成回复:`;
+          
+          const formattedHistory = chatHistory
+            .filter(msg => msg.role === 'user' || msg.role === 'assistant')
+            .map(msg => new Message(
+              msg.user_id || 'unknown',
+              msg.role === 'user' ? MessageRole.USER : MessageRole.ASSISTANT,
+              msg.content,
+              new Date(msg.timestamp || Date.now()),
+              MessageType.TEXT
+            ));
+            
+          const response = await this.openAIConnector.generateChatResponse(
+            formattedHistory,
+            combinedPrompt,
+            apiKey,
+            apiUrl
+          );
+          
+          return response || '抱歉，我无法处理您的请求。';
+        } catch (retryError) {
+          console.error('[PlanningService] 重试生成回复失败:', retryError);
+          return `抱歉，生成回复时发生错误: ${error}`;
+        }
       }
     } catch (error) {
       console.error('[PlanningService] 生成最终回复出错:', error);

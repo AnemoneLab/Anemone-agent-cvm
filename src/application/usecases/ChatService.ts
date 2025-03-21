@@ -1,5 +1,5 @@
 import { EventBus } from '../../domain/events/EventBus';
-import { MemoryRepository } from '../../domain/memory/MemoryRepository';
+import { MemoryRepository, MessageDTO } from '../../domain/memory/MemoryRepository';
 import { Message, MessageRole, MessageType } from '../../domain/memory/ShortTermMemory';
 import { SQLiteMemoryRepository } from '../../infrastructure/persistence/SQLiteMemoryRepository';
 
@@ -40,7 +40,9 @@ export class ChatService {
           content: msg.content,
           timestamp: msg.getTimestampISOString(),
           message_type: msg.messageType,
-          metadata: msg.metadata ? JSON.parse(msg.metadata) : null
+          metadata: msg.metadata ? JSON.parse(msg.metadata) : null,
+          conversation_round: msg.conversation_round,
+          related_message_id: msg.related_message_id
         }))
       };
     } catch (error) {
@@ -53,24 +55,60 @@ export class ChatService {
   }
   
   /**
+   * 按会话轮次获取消息
+   * @param userId 用户ID
+   * @param rounds 轮次数量（默认3轮）
+   * @returns 特定轮次的消息
+   */
+  public async getMessagesByRounds(
+    userId: string,
+    rounds: number = 3
+  ): Promise<any[]> {
+    try {
+      const messages = await this.memoryRepository.getMessagesByRounds(userId, rounds);
+      
+      return messages.map(msg => ({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.getTimestampISOString(),
+        message_type: msg.messageType,
+        metadata: msg.metadata ? JSON.parse(msg.metadata) : null,
+        conversation_round: msg.conversation_round,
+        related_message_id: msg.related_message_id
+      }));
+    } catch (error) {
+      console.error('按轮次获取消息时出错:', error);
+      return [];
+    }
+  }
+  
+  /**
+   * 获取下一个会话轮次
+   * @param userId 用户ID
+   * @returns 下一个会话轮次
+   */
+  public async getNextConversationRound(userId: string): Promise<number> {
+    try {
+      return await this.memoryRepository.getNextConversationRound(userId);
+    } catch (error) {
+      console.error('获取下一个会话轮次时出错:', error);
+      return 1; // 默认从第1轮开始
+    }
+  }
+  
+  /**
    * 保存消息到聊天历史记录
    * @param messageData 消息数据
+   * @returns 保存结果，包含消息ID
    */
-  public async saveMessage(messageData: { 
-    user_id: string, 
-    role: string, 
-    content: string, 
-    timestamp: string 
-  }): Promise<void> {
+  public async saveMessage(messageData: MessageDTO): Promise<{ success: boolean; id?: number }> {
     try {
-      await this.memoryRepository.saveMessage({
-        user_id: messageData.user_id,
-        role: messageData.role as MessageRole,
-        content: messageData.content,
-        timestamp: messageData.timestamp
-      });
+      // 使用MessageDTO接口来传递所有字段
+      return await this.memoryRepository.saveMessage(messageData);
     } catch (error) {
       console.error('保存消息时出错:', error);
+      return { success: false };
     }
   }
 } 

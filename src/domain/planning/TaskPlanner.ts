@@ -68,7 +68,7 @@ export class LLMTaskPlanner implements TaskPlanner {
    * @param userMessage 用户消息
    * @returns 任务计划
    */
-  public async createPlan(userId: string, userMessage: string): Promise<TaskPlan> {
+  public async createPlan(userId: string, userMessage: string, chatHistory: any[] = []): Promise<TaskPlan> {
     // 创建新的任务计划
     const plan = new TaskPlan(userId, userMessage);
     
@@ -80,8 +80,8 @@ export class LLMTaskPlanner implements TaskPlanner {
     
     if (this.openAIConnector && this.apiKey) {
       try {
-        // 使用LLM确定命令
-        commandsToExecute = await this.determineCommandsWithLLM(userMessage);
+        // 使用LLM确定命令，传入聊天历史
+        commandsToExecute = await this.determineCommandsWithLLM(userMessage, chatHistory);
         console.log(`[LLMTaskPlanner] LLM分析用户意图结果: ${JSON.stringify(commandsToExecute)}`);
       } catch (error) {
         console.error('LLM分析失败:', error);
@@ -116,9 +116,10 @@ export class LLMTaskPlanner implements TaskPlanner {
   /**
    * 使用LLM确定需要执行的命令
    * @param userMessage 用户消息
+   * @param chatHistory 聊天历史
    * @returns 命令列表
    */
-  private async determineCommandsWithLLM(userMessage: string): Promise<string[]> {
+  private async determineCommandsWithLLM(userMessage: string, chatHistory: any[] = []): Promise<string[]> {
     if (!this.openAIConnector || !this.apiKey) {
       return ['none'];
     }
@@ -128,11 +129,21 @@ export class LLMTaskPlanner implements TaskPlanner {
       `${tool.name}: ${tool.description}`
     ).join('\n');
     
+    // 格式化聊天历史
+    const formattedHistory = chatHistory.length > 0 
+      ? "Previous conversation context:\n" + 
+        chatHistory.map((msg) => 
+          `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`
+        ).join('\n')
+      : "No previous conversation.";
+    
     const prompt = `
 I need to determine which tools to use based on a user message.
 
 Available tools:
 ${toolsDescription}
+
+${formattedHistory}
 
 User message: "${userMessage}"
 
@@ -141,6 +152,7 @@ Please analyze the user's intent and determine which tools I should use. Conside
 2. If the user is just greeting or making small talk, use the "none" tool
 3. If the question is about balances or tokens, you MUST include BOTH queryRoleData AND getTokens/getTokensSummary tools
 4. If no specific data is needed, use the "none" tool
+5. Consider the conversation context when determining the appropriate tools
 
 Explain your reasoning first, then list the selected tools with a '$' prefix in a new paragraph.
 For example:

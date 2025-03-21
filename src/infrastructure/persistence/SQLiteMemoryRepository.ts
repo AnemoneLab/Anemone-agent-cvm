@@ -12,6 +12,8 @@ interface MessageDTO {
   timestamp: string;
   message_type?: MessageType;
   metadata?: string;
+  conversation_round?: number;
+  related_message_id?: number;
 }
 
 /**
@@ -32,8 +34,8 @@ export class SQLiteMemoryRepository implements MemoryRepository {
   public async saveMessage(message: MessageDTO): Promise<{ success: boolean, id?: number }> {
     try {
       const query = `
-        INSERT INTO message_history (user_id, role, content, timestamp, message_type, metadata)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO message_history (user_id, role, content, timestamp, message_type, metadata, conversation_round, related_message_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `;
       
       const result: any = await runQuery(query, [
@@ -42,7 +44,9 @@ export class SQLiteMemoryRepository implements MemoryRepository {
         message.content,
         message.timestamp,
         message.message_type || 'text',
-        message.metadata ? JSON.stringify(message.metadata) : null
+        message.metadata ? JSON.stringify(message.metadata) : null,
+        message.conversation_round || null,
+        message.related_message_id || null
       ]);
       
       return { success: true, id: result.lastID };
@@ -65,7 +69,7 @@ export class SQLiteMemoryRepository implements MemoryRepository {
   ): Promise<Message[]> {
     try {
       let query = `
-        SELECT id, user_id, role, content, timestamp, message_type, metadata
+        SELECT id, user_id, role, content, timestamp, message_type, metadata, conversation_round, related_message_id
         FROM message_history
         WHERE user_id = ?
       `;
@@ -94,7 +98,9 @@ export class SQLiteMemoryRepository implements MemoryRepository {
         content: row.content,
         timestamp: row.timestamp,
         message_type: row.message_type,
-        metadata: row.metadata
+        metadata: row.metadata,
+        conversation_round: row.conversation_round,
+        related_message_id: row.related_message_id
       }));
     } catch (error) {
       console.error('Error getting recent messages:', error);
@@ -113,7 +119,7 @@ export class SQLiteMemoryRepository implements MemoryRepository {
   ): Promise<Message[]> {
     try {
       const query = `
-        SELECT id, user_id, role, content, timestamp, message_type, metadata
+        SELECT id, user_id, role, content, timestamp, message_type, metadata, conversation_round, related_message_id
         FROM message_history
         WHERE user_id = ?
         ORDER BY timestamp ASC
@@ -129,11 +135,85 @@ export class SQLiteMemoryRepository implements MemoryRepository {
         content: row.content,
         timestamp: row.timestamp,
         message_type: row.message_type,
-        metadata: row.metadata
+        metadata: row.metadata,
+        conversation_round: row.conversation_round,
+        related_message_id: row.related_message_id
       }));
     } catch (error) {
       console.error('Error getting conversation history:', error);
       return [];
+    }
+  }
+
+  /**
+   * 获取特定会话轮次的消息
+   * @param userId 用户ID
+   * @param rounds 轮次数量
+   */
+  public async getMessagesByRounds(
+    userId: string,
+    rounds: number = 3
+  ): Promise<Message[]> {
+    try {
+      // 首先获取最大会话轮次
+      const maxRoundQuery = `
+        SELECT MAX(conversation_round) as max_round
+        FROM message_history
+        WHERE user_id = ? AND conversation_round IS NOT NULL
+      `;
+      
+      const maxRoundResult = await getQuery(maxRoundQuery, [userId]);
+      const maxRound = maxRoundResult[0]?.max_round || 0;
+      
+      // 计算要获取的最小轮次
+      const minRound = Math.max(1, maxRound - rounds + 1);
+      
+      // 获取指定轮次范围的所有消息
+      const query = `
+        SELECT id, user_id, role, content, timestamp, message_type, metadata, conversation_round, related_message_id
+        FROM message_history
+        WHERE user_id = ? AND conversation_round >= ? AND conversation_round <= ?
+        ORDER BY conversation_round ASC, timestamp ASC
+      `;
+      
+      const results = await getQuery(query, [userId, minRound, maxRound]);
+      
+      return results.map(row => Message.fromDTO({
+        id: row.id,
+        user_id: row.user_id,
+        role: row.role,
+        content: row.content,
+        timestamp: row.timestamp,
+        message_type: row.message_type,
+        metadata: row.metadata,
+        conversation_round: row.conversation_round,
+        related_message_id: row.related_message_id
+      }));
+    } catch (error) {
+      console.error('Error getting messages by rounds:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 获取下一个会话轮次
+   * @param userId 用户ID
+   */
+  public async getNextConversationRound(userId: string): Promise<number> {
+    try {
+      const query = `
+        SELECT MAX(conversation_round) as max_round
+        FROM message_history
+        WHERE user_id = ?
+      `;
+      
+      const result = await getQuery(query, [userId]);
+      const maxRound = result[0]?.max_round || 0;
+      
+      return maxRound + 1;
+    } catch (error) {
+      console.error('Error getting next conversation round:', error);
+      return 1; // 如果出错，默认从第1轮开始
     }
   }
 

@@ -10,6 +10,8 @@ export interface MessageDTO {
   timestamp: string;
   message_type?: string;
   metadata?: string;
+  conversation_round?: number;
+  related_message_id?: number;
 }
 
 /**
@@ -43,6 +45,22 @@ export interface MemoryRepository {
     userId: string,
     limit?: number
   ): Promise<Message[]>;
+  
+  /**
+   * 获取特定会话轮次的消息
+   * @param userId 用户ID
+   * @param rounds 轮次数量
+   */
+  getMessagesByRounds(
+    userId: string,
+    rounds?: number
+  ): Promise<Message[]>;
+  
+  /**
+   * 获取下一个会话轮次
+   * @param userId 用户ID
+   */
+  getNextConversationRound(userId: string): Promise<number>;
   
   /**
    * 删除用户的所有消息
