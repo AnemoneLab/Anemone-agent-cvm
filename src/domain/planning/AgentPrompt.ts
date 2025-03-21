@@ -33,6 +33,13 @@ export class AgentPrompt {
    - 使用"$execute:getTokens"获取详细代币列表
    - 使用"$execute:getTokensSummary"获取代币余额汇总信息，包括总美元价值和SUI余额
 
+任务执行流程（新增）：
+1. 收到用户请求后，将首先创建一个任务清单，明确需要执行的步骤
+2. 任务清单以Markdown格式呈现，每个任务都有明确的状态标记
+3. 你将逐个执行任务，每完成一个任务就会在任务前打勾标记完成
+4. 只有当所有任务都执行完毕后，才会向用户返回最终答复
+5. 整个执行过程和任务状态变化都会记录在日志中
+
 使用命令的强制规则（必须遵守）：
 1. 你的每个回复必须包含至少一个命令，否则系统会拒绝你的回复
 2. 如果用户的问题需要查询数据（如余额、健康值、技能等），使用对应的命令
@@ -80,5 +87,63 @@ ${commandResults}
    */
   public static getRetryPrompt(originalMessage: string): string {
     return `${originalMessage}\n\n系统消息：你必须在回复中包含命令（比如$execute:queryRoleData或$execute:none）。如果不需要查询数据，请使用$execute:none命令。`;
+  }
+  
+  /**
+   * 获取任务计划创建提示
+   * @param userMessage 用户消息
+   * @returns 任务计划创建提示词
+   */
+  public static getTaskPlanningPrompt(userMessage: string): string {
+    return `
+请为以下用户消息创建一个任务执行计划:
+
+用户消息: "${userMessage}"
+
+任务计划应该包括：
+1. 用户意图分析
+2. 所需信息列表
+3. 执行步骤，按顺序排列
+4. 每个步骤对应的命令（如果需要）
+
+格式示例:
+\`\`\`markdown
+## 任务计划
+
+1. [ ] 解析用户意图
+2. [ ] 获取钱包余额 ($execute:getTokensSummary)
+3. [ ] 获取技能信息 ($execute:querySkillDetails)
+4. [ ] 整合信息并准备回复
+\`\`\`
+
+只包含完成任务所必需的步骤，不要添加多余的步骤。
+`;
+  }
+  
+  /**
+   * 获取任务执行提示
+   * @param taskDescription 任务描述
+   * @param command 关联命令（如果有）
+   * @returns 任务执行提示词
+   */
+  public static getTaskExecutionPrompt(taskDescription: string, command?: string): string {
+    if (command) {
+      return `
+请执行以下任务:
+
+任务: "${taskDescription}"
+命令: ${command}
+
+请执行这个命令并报告结果。
+`;
+    } else {
+      return `
+请执行以下任务:
+
+任务: "${taskDescription}"
+
+这个任务不需要执行具体命令，请直接完成任务并报告结果。
+`;
+    }
   }
 } 

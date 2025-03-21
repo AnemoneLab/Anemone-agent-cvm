@@ -59,7 +59,7 @@ const startServer = async () => {
         await walletService.initializeWallet();
         
         // 设置路由
-        setupRoutes(app, walletService, agentCoordinator);
+        setupRoutes(app, walletService, agentCoordinator, eventBus);
         
         // 启动服务器
         app.listen(PORT, () => {

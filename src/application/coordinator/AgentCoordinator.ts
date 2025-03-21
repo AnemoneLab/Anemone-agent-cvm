@@ -7,6 +7,9 @@ import { WalletService } from '../usecases/WalletService';
 import { BlockberryService } from '../usecases/BlockberryService';
 import { RoleData } from '../../domain/profile/RoleData';
 import { TokenBalance } from '../../infrastructure/blockchain/BlockberryConnector';
+import { PlanningService } from '../usecases/PlanningService';
+import { OpenAIConnector } from '../../infrastructure/llm/OpenAIConnector';
+import { Message, MessageRole, MessageType } from '../../domain/memory/ShortTermMemory';
 
 /**
  * 代理协调器上下文实现
@@ -42,6 +45,8 @@ export class AgentCoordinator {
   private chatService: ChatService;
   private walletService: WalletService;
   private blockberryService: BlockberryService;
+  private planningService: PlanningService;
+  private openAIConnector: OpenAIConnector;
   
   /**
    * 创建一个新的代理协调器实例
@@ -57,9 +62,11 @@ export class AgentCoordinator {
     this.chatService = new ChatService(eventBus);
     this.walletService = new WalletService(eventBus);
     this.blockberryService = new BlockberryService(eventBus);
+    this.planningService = new PlanningService(eventBus);
+    this.openAIConnector = new OpenAIConnector();
     
-    // 订阅相关事件
-    this.eventBus.subscribe(AgentEventType.MESSAGE_RECEIVED, this.onMessageReceived.bind(this));
+    // 不再订阅 MESSAGE_RECEIVED 事件，由 PlanningService 处理
+    this.eventBus.subscribe(AgentEventType.TASK_PLAN_COMPLETED, this.onTaskPlanCompleted.bind(this));
   }
   
   /**
@@ -77,13 +84,126 @@ export class AgentCoordinator {
     apiKey?: string,
     apiUrl?: string
   ): Promise<any> {
-    return await this.chatService.processMessage(
-      message,
+    console.log(`[AgentCoordinator] 处理消息: ${message}, 用户: ${userId}, 角色: ${roleId}`);
+    
+    // 生成消息ID
+    const messageId = new Date().toISOString();
+    
+    // 保存用户消息到历史记录
+    await this.saveMessage({
       userId,
-      roleId,
-      apiKey,
-      apiUrl
-    );
+      content: message,
+      sender: 'user'
+    });
+
+    try {
+      // 发布消息接收事件，通知 PlanningService 处理
+      this.eventBus.publish(AgentEventType.MESSAGE_RECEIVED, {
+        userId,
+        roleId,
+        message,
+        timestamp: messageId,
+        apiKey,
+        apiUrl
+      });
+      
+      // 等待消息处理完成，最多等待60秒
+      console.log(`[AgentCoordinator] 等待消息处理完成: ${messageId}`);
+      const processingCompleted = await this.eventBus.waitForProcessingCompleted(messageId, userId, 60000);
+      
+      if (processingCompleted) {
+        console.log(`[AgentCoordinator] 消息处理已完成，正在获取最新回复`);
+        
+        // 获取最新的聊天历史（限制为2条，只获取当前用户消息和助手回复）
+        const historyResult = await this.getChatHistory(userId, 2);
+        
+        if (historyResult.success && historyResult.messages && historyResult.messages.length > 0) {
+          // 找出助手的回复（最新的消息可能是助手回复）
+          const assistantMessage = historyResult.messages.find((msg: any) => msg.role === 'assistant');
+          
+          if (assistantMessage) {
+            return {
+              success: true,
+              response: {
+                text: assistantMessage.content,
+                roleId,
+                userId,
+                timestamp: assistantMessage.timestamp
+              }
+            };
+          }
+        }
+      }
+      
+      // 如果处理没有完成或无法获取回复，返回默认响应
+      console.log(`[AgentCoordinator] 无法获取助手回复，返回默认响应`);
+      return {
+        success: true,
+        response: {
+          text: "正在思考中，请稍后查看回复...",
+          roleId,
+          userId,
+          timestamp: messageId,
+          pending: true
+        }
+      };
+    } catch (error) {
+      console.error('[AgentCoordinator] 处理消息时出错:', error);
+      return {
+        success: false,
+        error: `处理消息时出错: ${error}`
+      };
+    }
+  }
+  
+  /**
+   * 任务计划完成事件处理函数
+   * @param event 事件对象
+   */
+  private async onTaskPlanCompleted(event: any): Promise<void> {
+    try {
+      // 检查事件数据是否存在
+      if (!event || !event.data) {
+        console.error('[AgentCoordinator] 收到无效的任务计划完成事件：数据缺失');
+        return;
+      }
+      
+      const userId = event.data.userId;
+      const message = event.data.message || ''; // 提供默认空字符串，避免undefined
+      const results = event.data.results;
+      const markdown = event.data.markdown;
+      
+      // 检查用户ID是否存在
+      if (!userId) {
+        console.error('[AgentCoordinator] 收到无效的任务计划完成事件：缺少用户ID');
+        return;
+      }
+      
+      // 安全地截取消息内容
+      const messagePreview = message ? (message.substring(0, 20) + '...') : '(无消息内容)';
+      
+      console.log(`[AgentCoordinator] 收到任务计划完成事件: ${JSON.stringify({
+        userId,
+        messagePreview,
+        hasResults: !!results
+      })}`);
+      
+      // 保存助手回复到历史记录
+      if (results && results.finalResponse) {
+        await this.saveMessage({
+          userId,
+          content: results.finalResponse,
+          sender: 'bot'
+        });
+        
+        const responsePreview = results.finalResponse.substring(0, 30) + '...';
+        console.log(`[AgentCoordinator] 已保存助手回复到历史记录: ${responsePreview}`);
+      } else {
+        console.warn(`[AgentCoordinator] 任务计划完成事件中没有找到有效的回复内容`);
+      }
+    } catch (error) {
+      console.error('[AgentCoordinator] 处理任务计划完成事件时出错:', error);
+    }
   }
   
   /**
@@ -101,14 +221,22 @@ export class AgentCoordinator {
   }
   
   /**
-   * 消息接收事件处理函数
-   * @param event 事件对象
+   * 保存消息到聊天历史
+   * @param messageData 消息数据
    */
-  private onMessageReceived(event: any): void {
-    console.log(`[AgentCoordinator] 收到消息事件: ${JSON.stringify(event.data)}`);
-    // TODO: 在这里实现更复杂的代理决策逻辑
+  public async saveMessage(messageData: { userId: string, content: string, sender: 'user' | 'bot' }): Promise<void> {
+    const { userId, content, sender } = messageData;
+    const role = sender === 'user' ? 'user' : 'assistant';
+    
+    // 调用ChatService的方法保存消息
+    await this.chatService.saveMessage({
+      user_id: userId,
+      role,
+      content,
+      timestamp: new Date().toISOString()
+    });
   }
-  
+
   /**
    * 执行指定的Action
    * @param actionId Action ID
@@ -231,64 +359,10 @@ export class AgentCoordinator {
   }
   
   /**
-   * 保存消息到聊天历史
-   * @param messageData 消息数据
-   */
-  public async saveMessage(messageData: { userId: string, content: string, sender: 'user' | 'bot' }): Promise<void> {
-    const { userId, content, sender } = messageData;
-    const role = sender === 'user' ? 'user' : 'assistant';
-    
-    // 调用ChatService的方法保存消息
-    await this.chatService.saveMessage({
-      user_id: userId,
-      role,
-      content,
-      timestamp: new Date().toISOString()
-    });
-  }
-  
-  /**
-   * 生成对用户消息的响应
-   * @param message 用户消息
-   * @param userId 用户ID
-   */
-  public async generateResponse(message: string, userId: string): Promise<string> {
-    try {
-      // 获取当前配置
-      const profileResult = await this.getProfile();
-      const roleId = profileResult.success ? profileResult.profile.role_id : 'default';
-      
-      // 获取API Key (假设从环境变量中获取)
-      const apiKey = process.env.OPENAI_API_KEY;
-      const apiUrl = process.env.OPENAI_API_URL;
-      
-      // 处理消息并生成响应
-      const result = await this.processChat(message, userId, roleId, apiKey, apiUrl);
-      
-      if (result.success && result.response) {
-        return result.response.text;
-      } else {
-        return "抱歉，我无法生成回复。";
-      }
-    } catch (error) {
-      console.error('生成响应时出错:', error);
-      return "生成回复时发生错误。";
-    }
-  }
-  
-  /**
    * 获取钱包信息
    */
   public async getWalletInfo(): Promise<{ success: boolean, address?: string, created_at?: string, error?: string }> {
     return await this.walletService.getWalletInfo();
-  }
-
-  /**
-   * 获取ChatService实例
-   * 便于外部设置AgentCoordinator
-   */
-  public getChatService(): ChatService {
-    return this.chatService;
   }
 
   /**

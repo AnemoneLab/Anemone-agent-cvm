@@ -1,23 +1,27 @@
 import { Router, Request, Response } from 'express';
 import { WalletService } from '../../application/usecases/WalletService';
 import { AgentCoordinator } from '../../application/coordinator/AgentCoordinator';
+import { ChatService } from '../../application/usecases/ChatService';
+import { EventBus } from '../../domain/events/EventBus';
 
 /**
  * 设置API路由
  * @param app Express应用实例
  * @param walletService 钱包服务实例
  * @param agentCoordinator 代理协调器实例
+ * @param eventBus 事件总线实例
  */
 export function setupRoutes(
   app: any,
   walletService: WalletService,
-  agentCoordinator: AgentCoordinator
+  agentCoordinator: AgentCoordinator,
+  eventBus: EventBus
 ): void {
   // 设置钱包相关路由
   setupWalletRoutes(app, walletService);
   
   // 设置聊天相关路由
-  setupChatRoutes(app, agentCoordinator);
+  setupChatRoutes(app, agentCoordinator, eventBus);
   
   // Profile初始化路由
   app.post('/profile/init', async (req: Request, res: Response) => {
@@ -122,17 +126,10 @@ function setupWalletRoutes(app: any, walletService: WalletService): void {
  * 设置聊天相关路由
  * @param app Express应用实例
  * @param agentCoordinator 代理协调器实例
+ * @param eventBus 事件总线实例
  */
-function setupChatRoutes(app: any, agentCoordinator: AgentCoordinator): void {
-  // 确保ChatService中的agentCoordinator被正确设置
-  console.log('[API Routes] 设置ChatService的AgentCoordinator实例');
-  const chatService = agentCoordinator.getChatService();
-  if (chatService) {
-    console.log('[API Routes] 成功获取ChatService实例并设置AgentCoordinator');
-    chatService.setAgentCoordinator(agentCoordinator);
-  } else {
-    console.error('[API Routes] 无法获取ChatService实例，命令执行功能可能无法正常工作');
-  }
+function setupChatRoutes(app: any, agentCoordinator: AgentCoordinator, eventBus: EventBus): void {
+  // 直接使用 AgentCoordinator 处理聊天，不需要单独创建 ChatService
   
   // 聊天路由
   app.post('/chat', async (req: Request, res: Response) => {
