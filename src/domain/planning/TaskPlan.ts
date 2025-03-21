@@ -160,58 +160,69 @@ export class TaskPlan {
   }
 
   /**
-   * 将任务计划转换为Markdown格式的任务清单
-   * @returns Markdown格式的任务清单
+   * 生成任务计划的Markdown格式输出
+   * @returns Markdown格式字符串
    */
   public toMarkdown(): string {
-    let markdown = `## 任务清单 [Plan ID: ${this.planId}]\n\n`;
-    markdown += `* 用户消息: "${this.userMessage}"\n`;
-    markdown += `* 创建时间: ${this.createdAt.toISOString()}\n\n`;
+    const tasks = this.getTasks();
     
-    this.tasks.forEach((task, index) => {
-      const checkbox = task.status === TaskStatus.COMPLETED ? '[x]' : '[ ]';
-      const statusEmoji = this.getStatusEmoji(task.status);
-      markdown += `${index + 1}. ${checkbox} ${statusEmoji} ${task.description}\n`;
+    // 创建任务列表的Markdown表示
+    let markdown = `## 任务计划\n\n`;
+    
+    tasks.forEach((task, index) => {
+      const statusIcon = task.status === TaskStatus.COMPLETED ? '✅' : '[ ]';
+      const taskNumber = index + 1;
+      let taskLine = `${taskNumber}. [${statusIcon}] ${task.description}`;
       
-      if (task.command) {
-        markdown += `   - 命令: \`${task.command}\`\n`;
+      // 如果任务有关联命令，则添加命令信息
+      if (task.command && task.command !== 'none') {
+        taskLine += ` (命令: \`$${task.command}\`)`;
       }
       
-      if (task.result) {
-        markdown += `   - 结果: ${task.result.substring(0, 100)}${task.result.length > 100 ? '...' : ''}\n`;
-      }
-      
-      if (task.startTime) {
-        markdown += `   - 开始: ${task.startTime.toISOString()}\n`;
-      }
-      
-      if (task.endTime) {
-        markdown += `   - 结束: ${task.endTime.toISOString()}\n`;
-      }
-      
-      markdown += '\n';
+      markdown += taskLine + '\n';
     });
     
     return markdown;
   }
 
   /**
-   * 获取状态对应的表情符号
-   * @param status 任务状态
-   * @returns 表情符号
+   * 生成任务进度日志
+   * 包含每个任务的执行时间和状态
+   * @returns 包含任务进度的日志字符串
    */
-  private getStatusEmoji(status: TaskStatus): string {
-    switch (status) {
-      case TaskStatus.PENDING:
-        return '⏳';
-      case TaskStatus.RUNNING:
-        return '🔄';
-      case TaskStatus.COMPLETED:
-        return '✅';
-      case TaskStatus.FAILED:
-        return '❌';
-      default:
-        return '';
-    }
+  public toProgressLog(): string {
+    const tasks = this.getTasks();
+    let log = '';
+    
+    tasks.forEach((task, index) => {
+      const taskNumber = index + 1;
+      const statusIcon = task.status === TaskStatus.COMPLETED ? '✅' : '[ ]';
+      
+      log += `${taskNumber}. [${statusIcon}] ${task.description}\n`;
+      
+      // 添加命令信息（如果有）
+      if (task.command && task.command !== 'none') {
+        log += `   - 命令: \`$${task.command}\`\n`;
+      }
+      
+      // 添加执行结果（如果有）
+      if (task.result) {
+        log += `   - 结果: ${task.result}\n`;
+      }
+      
+      // 添加开始时间
+      if (task.startTime) {
+        log += `   - 开始: ${task.startTime}\n`;
+      }
+      
+      // 添加结束时间（如果任务已完成）
+      if (task.status === TaskStatus.COMPLETED && task.endTime) {
+        log += `   - 结束: ${task.endTime}\n`;
+      }
+      
+      log += '\n';
+    });
+    
+    return log;
   }
 } 

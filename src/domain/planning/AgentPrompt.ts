@@ -33,6 +33,15 @@ export class AgentPrompt {
    - 使用"$execute:getTokens"获取详细代币列表
    - 使用"$execute:getTokensSummary"获取代币余额汇总信息，包括总美元价值和SUI余额
 
+重要：关于余额查询的特殊说明：
+- 系统中有两种不同的余额:
+  1. Role对象中的余额: 只包含SUI代币，使用"$execute:queryRoleData"查询
+  2. 钱包中的余额: 可能包含多种代币，使用"$execute:getTokens"和"$execute:getTokensSummary"查询
+- 当用户询问余额时，必须同时查询两种余额:
+  1. 先执行"$execute:queryRoleData"获取Role对象中的SUI余额
+  2. 再执行"$execute:getTokens"或"$execute:getTokensSummary"获取钱包中的所有代币余额
+  3. 在回复中区分说明这两种不同的余额
+
 任务执行流程（新增）：
 1. 收到用户请求后，将首先创建一个任务清单，明确需要执行的步骤
 2. 任务清单以Markdown格式呈现，每个任务都有明确的状态标记
@@ -43,8 +52,9 @@ export class AgentPrompt {
 使用命令的强制规则（必须遵守）：
 1. 你的每个回复必须包含至少一个命令，否则系统会拒绝你的回复
 2. 如果用户的问题需要查询数据（如余额、健康值、技能等），使用对应的命令
-3. 如果用户的问题不需要任何查询或命令，你必须使用"$execute:none"命令
-4. 永远不要编造数据，如果需要数据，一定要用命令获取
+3. 如果用户问关于余额的问题，必须同时使用"$execute:queryRoleData"和"$execute:getTokens"命令
+4. 如果用户的问题不需要任何查询或命令，你必须使用"$execute:none"命令
+5. 永远不要编造数据，如果需要数据，一定要用命令获取
 
 命令格式：
 - 查询角色命令: "$execute:queryRoleData"
@@ -74,10 +84,13 @@ ${commandResults}
 
 请将这些结果整合到你的回复中，遵循以下规则：
 1. 极度简洁 - 直接给出用户询问的信息，不要添加多余文字
-2. 只回答用户明确询问的内容 - 例如，如果用户只问余额，只返回余额信息
+2. 只回答用户明确询问的内容
 3. 不要提及命令格式或系统操作的细节
 4. 不要添加客套话或无关的解释
-5. 如果用户只询问了一项信息（如余额），回复应该简短如"您的余额是X SUI"
+5. 如果同时查询了Role余额和钱包余额，请区分说明这两种余额:
+   - "您的Role余额是X SUI"
+   - "您的钱包余额是Y SUI"
+6. 如果用户只询问了一项信息（如余额），回复应该简短精确
 `;
   }
 
@@ -86,7 +99,7 @@ ${commandResults}
    * @param originalMessage 用户原始消息
    */
   public static getRetryPrompt(originalMessage: string): string {
-    return `${originalMessage}\n\n系统消息：你必须在回复中包含命令（比如$execute:queryRoleData或$execute:none）。如果不需要查询数据，请使用$execute:none命令。`;
+    return `${originalMessage}\n\n系统消息：你必须在回复中包含命令（比如$execute:queryRoleData或$execute:none）。如果不需要查询数据，请使用$execute:none命令。如果涉及余额查询，必须同时使用queryRoleData和getTokens命令。`;
   }
   
   /**
@@ -105,6 +118,10 @@ ${commandResults}
 2. 所需信息列表
 3. 执行步骤，按顺序排列
 4. 每个步骤对应的命令（如果需要）
+
+重要提示：如果用户询问余额相关信息，必须同时计划以下两个步骤:
+1. 获取Role余额 ($execute:queryRoleData)
+2. 获取钱包余额 ($execute:getTokens 或 $execute:getTokensSummary)
 
 格式示例:
 \`\`\`markdown

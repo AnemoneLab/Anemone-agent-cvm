@@ -51,11 +51,32 @@ class DefaultCommandExecutor implements CommandExecutor {
             throw new Error(roleDataResult.message || '获取角色数据失败');
           }
           
-          // 确保 BigInt 类型被转换为字符串
+          // 工具函数：格式化带小数点的数值
+          const formatDecimal = (value: bigint | string, decimals: number = 9): string => {
+            if (typeof value === 'string') {
+              value = BigInt(value);
+            }
+            
+            const valueStr = value.toString();
+            if (valueStr.length <= decimals) {
+              // 不足小数位数的补零
+              return "0." + "0".repeat(decimals - valueStr.length) + valueStr;
+            } else {
+              // 插入小数点
+              const intPart = valueStr.slice(0, valueStr.length - decimals);
+              const decimalPart = valueStr.slice(valueStr.length - decimals);
+              return `${intPart}.${decimalPart}`;
+            }
+          };
+          
+          // 确保 BigInt 类型被转换为可读的小数格式
           return JSON.stringify({
             roleId: roleDataResult.role?.id || '',
-            health: roleDataResult.role?.health ? roleDataResult.role.health.toString() : '0',
-            balance: roleDataResult.role?.balance ? roleDataResult.role.balance.toString() : '0',
+            // 格式化健康值和余额为小数格式
+            health: roleDataResult.role?.health ? formatDecimal(roleDataResult.role.health) : '0',
+            rawHealth: roleDataResult.role?.health ? roleDataResult.role.health.toString() : '0',
+            balance: roleDataResult.role?.balance ? formatDecimal(roleDataResult.role.balance) : '0',
+            rawBalance: roleDataResult.role?.balance ? roleDataResult.role.balance.toString() : '0',
             skills: roleDataResult.role?.skills || []
           });
         }
@@ -340,7 +361,7 @@ export class PlanningService {
         message: message,
         timestamp: new Date().toISOString(),
         results: results,
-        markdown: taskPlan.toMarkdown()
+        markdown: taskPlan.toProgressLog()
       });
       
       // 标记消息处理完成
@@ -411,19 +432,25 @@ export class PlanningService {
     const commands: string[] = [];
     const lowerMessage = message.toLowerCase();
 
-    // 如果消息中包含余额相关词汇，建议查询余额
-    if (lowerMessage.includes('余额') || 
+    // 检测余额相关词汇
+    const isBalanceRelated = lowerMessage.includes('余额') || 
         lowerMessage.includes('balance') || 
         lowerMessage.includes('代币') || 
         lowerMessage.includes('token') ||
         lowerMessage.includes('持有') ||
-        lowerMessage.includes('币')) {
+        lowerMessage.includes('币');
+
+    // 如果消息中包含余额相关词汇，同时查询两种余额
+    if (isBalanceRelated) {
+      // 添加Role余额查询命令
+      commands.push('queryRoleData');
+      
+      // 添加钱包余额查询命令
       commands.push('getTokens');
       commands.push('getTokensSummary');
-    }
-
-    // 如果消息中包含角色相关词汇，建议查询角色数据
-    if (lowerMessage.includes('角色') || 
+    } 
+    // 如果消息中单独包含角色相关词汇，但不包含余额相关词汇
+    else if (lowerMessage.includes('角色') || 
         lowerMessage.includes('role') || 
         lowerMessage.includes('健康') || 
         lowerMessage.includes('health')) {
@@ -436,11 +463,12 @@ export class PlanningService {
       commands.push('querySkillDetails');
     }
 
-    // 如果消息中包含钱包相关词汇，建议查询钱包
-    if (lowerMessage.includes('钱包') || 
+    // 如果消息中包含钱包相关词汇但不包含余额相关词汇，建议查询钱包
+    if ((lowerMessage.includes('钱包') || 
         lowerMessage.includes('wallet') || 
         lowerMessage.includes('地址') || 
-        lowerMessage.includes('address')) {
+        lowerMessage.includes('address')) && 
+        !isBalanceRelated) {
       commands.push('getWallet');
     }
 

@@ -136,18 +136,29 @@ ${toolsDescription}
 
 User message: "${userMessage}"
 
-Analyze the user's intent and determine which tools I should use. Consider the following:
+Please analyze the user's intent and determine which tools I should use. Consider the following:
 1. Only select tools that are directly relevant to answering the user's question
 2. If the user is just greeting or making small talk, use the "none" tool
-3. If multiple tools could be useful, include all of them
+3. If the question is about balances or tokens, you MUST include BOTH queryRoleData AND getTokens/getTokensSummary tools
 4. If no specific data is needed, use the "none" tool
 
-Return only the tool names in a JSON array format. For example:
-["getWallet", "getTokensSummary"]
+Explain your reasoning first, then list the selected tools with a '$' prefix in a new paragraph.
+For example:
 
-If no specific tools are needed, return: ["none"]
+The user is asking about their wallet balance. I need to check both the role balance and token information.
 
-The tools to use are:`;
+Tools to use:
+$queryRoleData
+$getTokensSummary
+
+If no specific tools are needed:
+
+The user is just greeting me, no specific data is required.
+
+Tools to use:
+$none
+
+Your response:`;
     
     try {
       // 调用OpenAI API
@@ -158,30 +169,51 @@ The tools to use are:`;
         this.apiUrl
       );
       
-      // 解析响应
-      let toolNames: string[] = [];
-      try {
-        // 尝试直接解析JSON
-        if (response.includes('[') && response.includes(']')) {
-          const jsonStr = response.substring(
-            response.indexOf('['),
-            response.lastIndexOf(']') + 1
-          );
-          toolNames = JSON.parse(jsonStr);
-        } else {
-          // 如果不是严格的JSON格式，尝试提取工具名称
-          this.availableTools.forEach(tool => {
-            if (response.includes(tool.name)) {
-              toolNames.push(tool.name);
-            }
-          });
+      // 解析响应，提取带有$前缀的命令
+      const toolNames: string[] = [];
+      const lines = response.split('\n');
+      
+      let toolSection = false;
+      for (const line of lines) {
+        const trimmedLine = line.trim();
+        
+        // 检查是否进入了工具列表部分
+        if (trimmedLine === 'Tools to use:') {
+          toolSection = true;
+          continue;
         }
-      } catch (error) {
-        console.error('解析LLM响应失败:', error, '原始响应:', response);
-        return ['none'];
+        
+        // 如果在工具列表部分，检查是否有带$前缀的命令
+        if (toolSection && trimmedLine.startsWith('$')) {
+          const toolName = trimmedLine.substring(1).trim(); // 移除$前缀
+          
+          // 验证这是一个有效的工具名称
+          if (this.availableTools.some(tool => tool.name === toolName)) {
+            toolNames.push(toolName);
+          }
+        }
       }
       
       console.log('LLM建议的工具:', toolNames);
+      
+      // 如果是余额相关查询，确保同时包含 queryRoleData 和 getTokens/getTokensSummary
+      const isBalanceQuery = userMessage.toLowerCase().includes('余额') || 
+                            userMessage.toLowerCase().includes('balance') ||
+                            userMessage.toLowerCase().includes('token') ||
+                            userMessage.toLowerCase().includes('代币');
+      
+      if (isBalanceQuery) {
+        // 确保包含 queryRoleData
+        if (!toolNames.includes('queryRoleData')) {
+          toolNames.push('queryRoleData');
+        }
+        
+        // 确保包含至少一个钱包余额查询工具
+        if (!toolNames.includes('getTokens') && !toolNames.includes('getTokensSummary')) {
+          toolNames.push('getTokensSummary');
+        }
+      }
+      
       return toolNames.length > 0 ? toolNames : ['none'];
     } catch (error) {
       console.error('调用LLM确定命令失败:', error);
