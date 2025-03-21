@@ -221,6 +221,26 @@ export class AgentCoordinator {
   }
   
   /**
+   * 按会话轮次获取消息
+   * @param userId 用户ID
+   * @param rounds 轮次数量
+   */
+  public async getMessagesByRounds(
+    userId: string,
+    rounds: number = 3
+  ): Promise<any[]> {
+    return await this.chatService.getMessagesByRounds(userId, rounds);
+  }
+  
+  /**
+   * 获取下一个会话轮次
+   * @param userId 用户ID
+   */
+  public async getNextConversationRound(userId: string): Promise<number> {
+    return await this.chatService.getNextConversationRound(userId);
+  }
+  
+  /**
    * 保存消息到聊天历史
    * @param messageData 消息数据
    */

@@ -191,4 +191,64 @@ function setupChatRoutes(app: any, agentCoordinator: AgentCoordinator, eventBus:
       });
     }
   });
+  
+  // 按会话轮次获取消息历史
+  app.get('/chat/history/rounds', async (req: Request, res: Response) => {
+    try {
+      const userId = req.query.userId as string;
+      const rounds = req.query.rounds ? parseInt(req.query.rounds as string) : 3;
+      
+      // 验证用户ID
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: '缺少必要参数: userId'
+        });
+      }
+      
+      // 使用AgentCoordinator获取按轮次组织的消息
+      const messages = await agentCoordinator.getMessagesByRounds(userId, rounds);
+      
+      return res.json({
+        success: true,
+        messages,
+        rounds
+      });
+    } catch (error) {
+      console.error('按轮次获取消息时出错:', error);
+      return res.status(500).json({
+        success: false,
+        error: '按轮次获取消息时出错'
+      });
+    }
+  });
+  
+  // 获取下一个会话轮次
+  app.get('/chat/rounds', async (req: Request, res: Response) => {
+    try {
+      const userId = req.query.userId as string;
+      
+      // 验证用户ID
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: '缺少必要参数: userId'
+        });
+      }
+      
+      // 使用AgentCoordinator获取下一个会话轮次
+      const nextRound = await agentCoordinator.getNextConversationRound(userId);
+      
+      return res.json({
+        success: true,
+        nextRound
+      });
+    } catch (error) {
+      console.error('获取下一个会话轮次时出错:', error);
+      return res.status(500).json({
+        success: false,
+        error: '获取下一个会话轮次时出错'
+      });
+    }
+  });
 } 
