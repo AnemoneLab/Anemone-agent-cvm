@@ -50,10 +50,12 @@ class DefaultCommandExecutor implements CommandExecutor {
           if (!roleDataResult.success) {
             throw new Error(roleDataResult.message || '获取角色数据失败');
           }
+          
+          // 确保 BigInt 类型被转换为字符串
           return JSON.stringify({
             roleId: roleDataResult.role?.id || '',
-            health: roleDataResult.role?.health || 0,
-            balance: roleDataResult.role?.balance || 0,
+            health: roleDataResult.role?.health ? roleDataResult.role.health.toString() : '0',
+            balance: roleDataResult.role?.balance ? roleDataResult.role.balance.toString() : '0',
             skills: roleDataResult.role?.skills || []
           });
         }
@@ -71,8 +73,20 @@ class DefaultCommandExecutor implements CommandExecutor {
             throw new Error(tokenResult.message || '获取代币列表失败');
           }
           
+          // 处理潜在的 BigInt 值
+          const processedBalances = tokenResult.balances?.map(token => ({
+            ...token,
+            // 安全地将任何值转换为字符串
+            balance: typeof token.balance === 'bigint' || typeof token.balance === 'number' ? 
+              String(token.balance) : token.balance,
+            balanceUsd: typeof token.balanceUsd === 'bigint' || typeof token.balanceUsd === 'number' ? 
+              String(token.balanceUsd) : token.balanceUsd,
+            coinPrice: typeof token.coinPrice === 'bigint' || typeof token.coinPrice === 'number' ? 
+              String(token.coinPrice) : token.coinPrice
+          })) || [];
+          
           return JSON.stringify({
-            tokens: tokenResult.balances || []
+            tokens: processedBalances
           });
         }
         
@@ -89,12 +103,23 @@ class DefaultCommandExecutor implements CommandExecutor {
             throw new Error(summaryResult.message || '获取代币汇总失败');
           }
           
-          return JSON.stringify(summaryResult.summary || {
+          // 处理潜在的 BigInt 值
+          const processedSummary = summaryResult.summary ? {
+            totalUsdValue: typeof summaryResult.summary.totalUsdValue === 'bigint' || typeof summaryResult.summary.totalUsdValue === 'number' ? 
+              String(summaryResult.summary.totalUsdValue) : summaryResult.summary.totalUsdValue,
+            suiBalance: typeof summaryResult.summary.suiBalance === 'bigint' || typeof summaryResult.summary.suiBalance === 'number' ? 
+              String(summaryResult.summary.suiBalance) : summaryResult.summary.suiBalance,
+            suiUsdValue: typeof summaryResult.summary.suiUsdValue === 'bigint' || typeof summaryResult.summary.suiUsdValue === 'number' ? 
+              String(summaryResult.summary.suiUsdValue) : summaryResult.summary.suiUsdValue,
+            tokensCount: summaryResult.summary.tokensCount
+          } : {
             totalUsdValue: 0,
             suiBalance: 0,
             suiUsdValue: 0,
             tokensCount: 0
-          });
+          };
+          
+          return JSON.stringify(processedSummary);
         }
         
         case 'querySkillDetails': {
@@ -103,8 +128,38 @@ class DefaultCommandExecutor implements CommandExecutor {
             throw new Error(roleDataResult.message || '获取角色数据失败');
           }
           
+          // 处理技能详情中可能存在的 BigInt 值
+          const processedSkillDetails = roleDataResult.skillDetails?.map(skill => {
+            if (!skill) return skill;
+            
+            // 创建一个新对象来存储处理后的技能详情
+            const processedSkill = { ...skill };
+            
+            // 处理可能存在的 BigInt 值，例如 fee 字段
+            if (typeof processedSkill.fee === 'bigint') {
+              processedSkill.fee = String(processedSkill.fee);
+            }
+            
+            // 递归处理对象中的所有 BigInt 值
+            const processObject = (obj: any): any => {
+              if (!obj || typeof obj !== 'object') return obj;
+              
+              Object.keys(obj).forEach(key => {
+                if (typeof obj[key] === 'bigint') {
+                  obj[key] = String(obj[key]);
+                } else if (typeof obj[key] === 'object' && obj[key] !== null) {
+                  obj[key] = processObject(obj[key]);
+                }
+              });
+              
+              return obj;
+            };
+            
+            return processObject(processedSkill);
+          }) || [];
+          
           return JSON.stringify({
-            skills: roleDataResult.skillDetails || []
+            skills: processedSkillDetails
           });
         }
         
@@ -114,7 +169,26 @@ class DefaultCommandExecutor implements CommandExecutor {
             throw new Error(profileResult.message || '获取Profile配置失败');
           }
           
-          return JSON.stringify(profileResult.profile || {});
+          // 处理配置中可能存在的 BigInt 值
+          const processProfile = (obj: any): any => {
+            if (!obj || typeof obj !== 'object') return obj;
+            
+            const processed = { ...obj };
+            
+            Object.keys(processed).forEach(key => {
+              if (typeof processed[key] === 'bigint') {
+                processed[key] = String(processed[key]);
+              } else if (typeof processed[key] === 'object' && processed[key] !== null) {
+                processed[key] = processProfile(processed[key]);
+              }
+            });
+            
+            return processed;
+          };
+          
+          const processedProfile = processProfile(profileResult.profile || {});
+          
+          return JSON.stringify(processedProfile);
         }
         
         case 'none':
