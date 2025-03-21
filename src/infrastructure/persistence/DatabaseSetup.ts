@@ -70,9 +70,8 @@ async function createTables(): Promise<void> {
   // 检查是否需要添加新列（适用于已有的数据库）
   try {
     // 检查message_history表是否存在conversation_round列
-    const hasConversationRound = await db?.get("PRAGMA table_info(message_history)").then(
-      (columns: any[]) => columns.some((col: any) => col.name === 'conversation_round')
-    );
+    const columns = await db?.all("PRAGMA table_info(message_history)");
+    const hasConversationRound = columns && Array.isArray(columns) && columns.some((col: any) => col.name === 'conversation_round');
     
     if (!hasConversationRound) {
       console.log('正在添加conversation_round列');
@@ -80,9 +79,7 @@ async function createTables(): Promise<void> {
     }
     
     // 检查message_history表是否存在related_message_id列
-    const hasRelatedMessageId = await db?.get("PRAGMA table_info(message_history)").then(
-      (columns: any[]) => columns.some((col: any) => col.name === 'related_message_id')
-    );
+    const hasRelatedMessageId = columns && Array.isArray(columns) && columns.some((col: any) => col.name === 'related_message_id');
     
     if (!hasRelatedMessageId) {
       console.log('正在添加related_message_id列');
